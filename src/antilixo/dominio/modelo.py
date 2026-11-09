@@ -91,3 +91,15 @@ class FalhaDeLimpeza:
 class ResultadoDaLimpeza:
     apagados: tuple[Achado, ...] = ()
     falhas: tuple[FalhaDeLimpeza, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class Leitura:
+    """O que um coletor achou e o que não conseguiu ler (TCC, pasta só na nuvem).
+
+    `nao_lidas` vai para a seção "Não deu para ler" do relatório: buraco de cobertura visível,
+    e não calado (verificação real de 2026-11-09).
+    """
+
+    achados: tuple[Achado, ...]
+    nao_lidas: tuple[str, ...] = ()

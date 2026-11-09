@@ -18,6 +18,7 @@ from antilixo.dominio.modelo import (
     Achado,
     Estado,
     FalhaDeLimpeza,
+    Leitura,
     ResultadoDaLimpeza,
     Veredito,
 )
@@ -40,13 +41,14 @@ class Ambiente:
     coletores: tuple[tuple[str, Coletor], ...] | None = None
 
 
-type Coletor = Callable[[Ambiente], tuple[Achado, ...]]
+type Coletor = Callable[[Ambiente], Leitura]
 
 
 @dataclass(frozen=True, slots=True)
 class Coleta:
     achados: tuple[Achado, ...]
     falhas: tuple[str, ...]  # "nome: erro" de cada coletor que quebrou
+    nao_lidas: tuple[str, ...] = ()  # buracos de cobertura (TCC, pasta só na nuvem)
 
 
 def executar(ambiente: Ambiente) -> None:
@@ -60,7 +62,7 @@ def executar(ambiente: Ambiente) -> None:
     # Estado antes do relatório: se o relatório não gravar, a data da limpeza não se perde e a
     # semana seguinte não apaga de novo (revisão de 2026-11-09).
     gravar_estado(pasta_de_estado, _estado_a_gravar(estado, veredito, resultado))
-    texto = montar_relatorio(veredito, resultado, ambiente.agora, coleta.falhas)
+    texto = montar_relatorio(veredito, resultado, ambiente.agora, coleta.falhas, coleta.nao_lidas)
     try:
         _ = gravar_relatorio(texto, pasta_de_estado, ambiente.agora)
     except OSError as erro:
@@ -72,22 +74,27 @@ def coletar_tudo(ambiente: Ambiente) -> Coleta:
     """Roda cada coletor; um que quebra vira linha no relatório e os outros seguem."""
     achados: list[Achado] = []
     falhas: list[str] = []
+    nao_lidas: list[str] = []
     for nome, coletor in ambiente.coletores or _COLETORES_REAIS:
         try:
-            achados.extend(coletor(ambiente))
+            trazidos = coletor(ambiente)
         # Fronteira da execução semanal: um coletor quebrado não pode calar os outros. O erro vai
         # para o relatório e, com o traceback, para o log.
         except Exception as erro:
             logger.exception("coletor %s falhou", nome)
             falhas.append(f"{nome}: {type(erro).__name__}: {erro}")
-    return Coleta(tuple(achados), tuple(falhas))
+            continue
+        logger.info("coletor %s: %d achado(s)", nome, len(trazidos.achados))
+        achados.extend(trazidos.achados)
+        nao_lidas.extend(trazidos.nao_lidas)
+    return Coleta(tuple(achados), tuple(falhas), tuple(nao_lidas))
 
 
 _COLETORES_REAIS: tuple[tuple[str, Coletor], ...] = (
-    ("caches", lambda a: coletar_caches(a.home)),
+    ("caches", lambda a: Leitura(coletar_caches(a.home))),
     ("fotos-em-nuvem", lambda a: coletar_fotos_em_nuvem(a.home)),
-    ("orfaos-library", lambda a: coletar_orfaos_library(a.home, a.pastas_de_apps)),
-    ("projetos", lambda a: coletar_projetos(a.home, a.home / "dev", a.agora.date())),
+    ("orfaos-library", lambda a: Leitura(coletar_orfaos_library(a.home, a.pastas_de_apps))),
+    ("projetos", lambda a: Leitura(coletar_projetos(a.home, a.home / "dev", a.agora.date()))),
 )
 
 

@@ -1,6 +1,7 @@
 """Execução semanal ponta a ponta num HOME falso (ADR-0001)."""
 
 import dataclasses
+import logging
 import os
 import subprocess
 import sys
@@ -9,8 +10,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from antilixo.coletores.caches import coletar_caches
-from antilixo.dominio.modelo import Achado, Categoria
+from antilixo.dominio.modelo import Categoria, Leitura
 from antilixo.execucao import Ambiente, coletar_tudo, executar
 from antilixo.relatorio.estado_em_disco import ler_estado
 
@@ -119,14 +122,14 @@ def test_relatorio_que_nao_grava_nao_impede_estado_nem_limpeza(tmp_path: Path) -
     assert ler_estado(_estado(tmp_path), hoje=AGORA.date()).ultima_limpeza == AGORA.date()
 
 
-def _coletor_quebrado(ambiente: Ambiente) -> tuple[Achado, ...]:
+def _coletor_quebrado(ambiente: Ambiente) -> Leitura:
     del ambiente
     msg = "plist esquisito"
     raise ValueError(msg)
 
 
-def _coletor_de_caches(ambiente: Ambiente) -> tuple[Achado, ...]:
-    return coletar_caches(ambiente.home)
+def _coletor_de_caches(ambiente: Ambiente) -> Leitura:
+    return Leitura(coletar_caches(ambiente.home))
 
 
 def test_coletor_que_quebra_vira_linha_no_relatorio_e_os_outros_seguem(tmp_path: Path) -> None:
@@ -143,3 +146,38 @@ def test_coletor_que_quebra_vira_linha_no_relatorio_e_os_outros_seguem(tmp_path:
     assert "quebrado" in relatorio.read_text()
     assert "plist esquisito" in relatorio.read_text()
     assert not cache.exists()
+
+
+def test_log_diz_quantos_achados_cada_coletor_trouxe(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Sem isso, uma pasta lida e vazia e uma pasta que o macOS bloqueou davam o mesmo log
+    # (verificação real de 2026-11-09).
+    caplog.set_level(logging.INFO)
+    _ = _cache_npm(tmp_path)
+    ambiente = dataclasses.replace(
+        _ambiente(tmp_path, ExecutorFalso()), coletores=(("caches", _coletor_de_caches),)
+    )
+
+    executar(ambiente)
+
+    assert "coletor caches: 1 achado(s)" in caplog.text
+
+
+def _coletor_com_buraco(ambiente: Ambiente) -> Leitura:
+    del ambiente
+    return Leitura(
+        (), ("CloudStorage/GoogleDrive-eu: sem permissão para ler (Privacidade do macOS)",)
+    )
+
+
+def test_o_que_nao_deu_para_ler_aparece_no_relatorio(tmp_path: Path) -> None:
+    ambiente = dataclasses.replace(
+        _ambiente(tmp_path, ExecutorFalso()), coletores=(("fotos-em-nuvem", _coletor_com_buraco),)
+    )
+
+    executar(ambiente)
+
+    texto = (_estado(tmp_path) / "relatorio.md").read_text()
+    assert "## Não deu para ler" in texto
+    assert "GoogleDrive-eu: sem permissão para ler" in texto

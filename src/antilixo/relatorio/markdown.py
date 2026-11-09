@@ -28,6 +28,7 @@ def montar_relatorio(
     resultado: ResultadoDaLimpeza,
     agora: datetime,
     falhas_de_coleta: tuple[str, ...] = (),
+    nao_lidas: tuple[str, ...] = (),
 ) -> str:
     linhas = [f"# Relatório do antilixo — {agora:%Y-%m-%d %H:%M}", ""]
     if veredito.crescimento_do_disco_bytes is not None:
@@ -56,6 +57,8 @@ def montar_relatorio(
     )
     # Coletor que quebrou: o resto do relatório vale, mas está incompleto (revisão de 2026-11-09).
     linhas.extend(_secao("Coletores com erro", [em_uma_linha(f) for f in falhas_de_coleta]))
+    # Buraco de cobertura à vista: foi um buraco calado que deixou 5,8 GB de Fotos passarem.
+    linhas.extend(_secao("Não deu para ler", [em_uma_linha(n) for n in nao_lidas]))
     return "\n".join(linhas)
 
 
