@@ -17,7 +17,9 @@ env:
 
 jobs:
   portao:
-    runs-on: ubuntu-24.04
+    # macOS: o antilixo só existe para Mac (launchctl, osascript, /bin/zsh do heartbeat, APFS).
+    # No Ubuntu os testes do heartbeat falhavam por falta do zsh (2026-11-09).
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       # Actions fixadas pelo SHA do commit da tag, não pela tag, que pode ser movida.
