@@ -3,11 +3,11 @@
 Origem: 5,8 GB de biblioteca do Fotos presa no iCloud Drive na formatação de 2026-11-08.
 """
 
-import errno
 import logging
 from pathlib import Path
 
 from antilixo.coletores.disco import somar_tamanho
+from antilixo.coletores.nao_lidas import resumir_pastas_nao_lidas
 from antilixo.dominio.modelo import Achado, Categoria, Leitura
 
 # iCloud Drive mora em Mobile Documents; Proton Drive, Dropbox e afins (File Provider), em
@@ -42,37 +42,6 @@ def coletar_fotos_em_nuvem(home: Path) -> Leitura:
     for linha in nao_lidas:
         logger.warning("não lido: %s", linha)
     return Leitura(tuple(achados), tuple(nao_lidas))
-
-
-def resumir_pastas_nao_lidas(rotulo: str, raiz: Path, erros: list[OSError]) -> tuple[str, ...]:
-    """Uma linha por motivo, com a contagem: o log e o relatório não ganham uma linha por pasta.
-
-    EDEADLK é o File Provider recusando baixar uma pasta que está só na nuvem para um processo em
-    segundo plano (Dropbox, Proton Drive): nada é baixado, e a pasta fica sem varrer.
-    """
-    if any(_mesmo_caminho(e, raiz) and _sem_permissao(e) for e in erros):
-        return (f"{rotulo}: sem permissão para ler (Privacidade do macOS)",)
-    so_na_nuvem = sum(e.errno == errno.EDEADLK for e in erros)
-    sem_permissao = sum(_sem_permissao(e) for e in erros)
-    outros = len(erros) - so_na_nuvem - sem_permissao
-    linhas = [
-        (so_na_nuvem, "só na nuvem, não baixadas"),
-        (sem_permissao, "sem permissão"),
-        (outros, "com erro de leitura"),
-    ]
-    return tuple(
-        f"{rotulo}: {n} {'pasta' if n == 1 else 'pastas'} {motivo}" for n, motivo in linhas if n
-    )
-
-
-def _sem_permissao(erro: OSError) -> bool:
-    return erro.errno in {errno.EPERM, errno.EACCES}
-
-
-def _mesmo_caminho(erro: OSError, raiz: Path) -> bool:
-    # `filename` vem tipado como Any da stdlib: estreita aqui, na borda.
-    nome: object = erro.filename  # pyright: ignore[reportAny]  # motivo: atributo da stdlib sem tipo; estreitado na linha seguinte
-    return isinstance(nome, str) and Path(nome) == raiz
 
 
 def _contas_sob(pasta: Path) -> list[Path]:

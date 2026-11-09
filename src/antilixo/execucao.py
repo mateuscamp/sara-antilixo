@@ -93,8 +93,8 @@ def coletar_tudo(ambiente: Ambiente) -> Coleta:
 _COLETORES_REAIS: tuple[tuple[str, Coletor], ...] = (
     ("caches", lambda a: Leitura(coletar_caches(a.home))),
     ("fotos-em-nuvem", lambda a: coletar_fotos_em_nuvem(a.home)),
-    ("orfaos-library", lambda a: Leitura(coletar_orfaos_library(a.home, a.pastas_de_apps))),
-    ("projetos", lambda a: Leitura(coletar_projetos(a.home, a.home / "dev", a.agora.date()))),
+    ("orfaos-library", lambda a: coletar_orfaos_library(a.home, a.pastas_de_apps)),
+    ("projetos", lambda a: coletar_projetos(a.home, a.home / "dev", a.agora.date())),
 )
 
 

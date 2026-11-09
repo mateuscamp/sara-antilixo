@@ -12,13 +12,14 @@ from typing import cast
 from xml.parsers.expat import ExpatError
 
 from antilixo.coletores.disco import somar_tamanho
+from antilixo.coletores.nao_lidas import resumir_pastas_nao_lidas
 from antilixo.dominio.excecoes_library import PASTAS_DA_LIBRARY, e_excecao
-from antilixo.dominio.modelo import Achado, Categoria
+from antilixo.dominio.modelo import Achado, Categoria, Leitura
 
 _log = logging.getLogger(__name__)
 
 
-def coletar_orfaos_library(home: Path, pastas_de_apps: tuple[Path, ...]) -> tuple[Achado, ...]:
+def coletar_orfaos_library(home: Path, pastas_de_apps: tuple[Path, ...]) -> Leitura:
     """Pastas da ~/Library sem app instalado correspondente.
 
     Nome com forma de bundle id casa com o bundle id do app (ou o prefixo dele com ponto); os
@@ -26,18 +27,25 @@ def coletar_orfaos_library(home: Path, pastas_de_apps: tuple[Path, ...]) -> tupl
     sessão-mãe: falso positivo é aceitável, porque vira só aviso e nunca apaga.
     """
     instalados = _apps_instalados(pastas_de_apps)
-    return tuple(
-        Achado(
-            Categoria.ORFAO_LIBRARY,
-            pasta,
-            somar_tamanho(pasta),
-            f"{pasta.name} sem app instalado ({subpasta})",
+    achados: list[Achado] = []
+    nao_lidas: list[str] = []
+    for subpasta in PASTAS_DA_LIBRARY:
+        raiz = home / "Library" / subpasta
+        erros: list[OSError] = []
+        achados.extend(
+            Achado(
+                Categoria.ORFAO_LIBRARY,
+                pasta,
+                somar_tamanho(pasta),
+                f"{pasta.name} sem app instalado ({subpasta})",
+            )
+            for pasta in _subpastas(raiz, erros)
+            if not _e_do_sistema(pasta.name, subpasta)
+            and not _e_de_app_instalado(pasta.name, instalados)
         )
-        for subpasta in PASTAS_DA_LIBRARY
-        for pasta in _subpastas(home / "Library" / subpasta)
-        if not _e_do_sistema(pasta.name, subpasta)
-        and not _e_de_app_instalado(pasta.name, instalados)
-    )
+        # O log sozinho era um buraco calado no relatório (achado da revisão de 2026-11-09).
+        nao_lidas.extend(resumir_pastas_nao_lidas(f"Library/{subpasta}", raiz, erros))
+    return Leitura(tuple(achados), tuple(nao_lidas))
 
 
 # Reverse-DNS: dois ou mais rótulos com ponto, o primeiro só letras (o domínio de topo). Proposta
@@ -79,7 +87,7 @@ def _e_de_bundle_id_instalado(chave: str, instalados: frozenset[str]) -> bool:
     return any(chave == i or chave.startswith(f"{i}.") for i in instalados)
 
 
-def _subpastas(raiz: Path) -> list[Path]:
+def _subpastas(raiz: Path, erros: list[OSError]) -> list[Path]:
     """Pastas diretamente sob `raiz`, sem seguir symlinks; raiz ausente dá lista vazia."""
     if not raiz.is_dir():
         return []
@@ -90,12 +98,14 @@ def _subpastas(raiz: Path) -> list[Path]:
             # Pasta oculta não é dado de app desinstalado (decisão de 2026-11-09).
             if not p.name.startswith(".") and p.is_dir() and not p.is_symlink()
         )
-    except PermissionError:
+    except PermissionError as erro:
+        erros.append(erro)
         # O TCC recusa ~/Library/Containers e afins ao LaunchAgent sem acesso total ao disco
         # (achado A3 de 2026-11-09). As outras pastas continuam sendo coletadas.
         _log.warning("sem permissão para listar, pasta pulada: %s", raiz)
         return []
     except OSError as erro:
+        erros.append(erro)
         _log.warning("erro ao listar, pasta pulada: %s (%s)", raiz, erro)
         return []
 

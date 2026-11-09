@@ -11,7 +11,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from antilixo.dominio.modelo import Achado, Categoria
+from antilixo.coletores.nao_lidas import caminho_do_erro, resumir_pastas_nao_lidas
+from antilixo.dominio.modelo import Achado, Categoria, Leitura
 from antilixo.dominio.tamanho import formatar_tamanho
 
 logger = logging.getLogger(__name__)
@@ -126,18 +127,41 @@ class _Situacao:
         )
 
 
-def coletar_projetos(home: Path, dev: Path, hoje: date, *, git: str = "git") -> tuple[Achado, ...]:
+def coletar_projetos(home: Path, dev: Path, hoje: date, *, git: str = "git") -> Leitura:
     """Achados de PROJETO_PARADO e GIT_FORA_DE_DEV para os repos sob `home`.
 
     `git` existe para o teste simular git ausente. Repo ilegível é pulado e fica no log.
     """
     achados: list[Achado] = []
-    for repo in _achar_repos(home):
+    erros: list[OSError] = []
+    for repo in _achar_repos(home, erros):
         try:
             achados.extend(_achados_do_repo(repo, home, dev, hoje, _abrir(git, repo)))
         except (RepoIlegivelError, OSError) as erro:
             logger.warning("repo pulado: %s: %s", repo, erro)
-    return tuple(achados)
+    nao_lidas = _resumir_por_pasta_do_home(home, erros)
+    for linha in nao_lidas:
+        logger.warning("não lido: %s", linha)
+    return Leitura(tuple(achados), nao_lidas)
+
+
+def _resumir_por_pasta_do_home(home: Path, erros: list[OSError]) -> tuple[str, ...]:
+    """Uma linha por pasta do primeiro nível do HOME (~/Documents, ~/Desktop), em ordem.
+
+    Pasta bloqueada (TCC do macOS, permissão) perde só os repos dela, mas o relatório precisa
+    dizer que ela não foi lida (achado da revisão de 2026-11-09).
+    """
+    por_pasta: dict[Path, list[OSError]] = {}
+    for erro in erros:
+        caminho = caminho_do_erro(erro)
+        dentro = caminho is not None and caminho != home and caminho.is_relative_to(home)
+        raiz = home / caminho.relative_to(home).parts[0] if caminho and dentro else home
+        por_pasta.setdefault(raiz, []).append(erro)
+    return tuple(
+        linha
+        for raiz in sorted(por_pasta)
+        for linha in resumir_pastas_nao_lidas(_exibir(raiz, home), raiz, por_pasta[raiz])
+    )
 
 
 def _achados_do_repo(repo: Path, home: Path, dev: Path, hoje: date, git: _Git) -> list[Achado]:
@@ -191,7 +215,7 @@ def _plural(quantidade: int, singular: str, plural: str) -> str:
     return f"{quantidade} {singular if quantidade == 1 else plural}"
 
 
-def _achar_repos(home: Path) -> Iterator[Path]:
+def _achar_repos(home: Path, erros: list[OSError]) -> Iterator[Path]:
     """Repos sob `home`, sem seguir symlinks e sem descer em lixo conhecido nem dentro de repo."""
     pendentes = [home]
     while pendentes:
@@ -202,8 +226,9 @@ def _achar_repos(home: Path) -> Iterator[Path]:
                     Path(e.path) for e in entradas if e.is_dir(follow_symlinks=False)
                 )
         except OSError as erro:
-            # Pasta protegida (TCC do macOS, permissão): perde-se só ela, não a coleta.
-            logger.warning("pasta pulada: %s: %s", pasta, erro)
+            # Pasta protegida (TCC do macOS, permissão): perde-se só ela, não a coleta. O erro
+            # vai resumido para o log e para o relatório, e não uma linha por pasta.
+            erros.append(erro)
             continue
         for subpasta in reversed(subpastas):
             if subpasta.name in _BUILD_SEMPRE or (pasta == home and subpasta.name in _NO_HOME):

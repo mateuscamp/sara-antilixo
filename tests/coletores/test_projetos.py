@@ -97,7 +97,9 @@ def _da_categoria(achados: tuple[Achado, ...], categoria: Categoria) -> list[Ach
 
 
 def _parados(home: Path) -> list[Achado]:
-    return _da_categoria(coletar_projetos(home, home / "dev", HOJE), Categoria.PROJETO_PARADO)
+    return _da_categoria(
+        coletar_projetos(home, home / "dev", HOJE).achados, Categoria.PROJETO_PARADO
+    )
 
 
 def test_repo_parado_com_node_modules_vira_projeto_parado_com_o_tamanho_do_build(
@@ -208,7 +210,7 @@ def test_repo_fora_de_dev_e_achado_com_o_tamanho_do_repo_inteiro(home: Path) -> 
     original = _escrever(repo / "node_modules" / "index.js", b"x" * 300)
     (repo / "node_modules" / "mesmo.js").hardlink_to(original)
 
-    achados = coletar_projetos(home, home / "dev", HOJE)
+    achados = coletar_projetos(home, home / "dev", HOJE).achados
 
     fora = _da_categoria(achados, Categoria.GIT_FORA_DE_DEV)
     assert [(a.caminho, a.tamanho_bytes, a.motivo) for a in fora] == [
@@ -217,13 +219,13 @@ def test_repo_fora_de_dev_e_achado_com_o_tamanho_do_repo_inteiro(home: Path) -> 
 
 
 def test_repo_dentro_de_dev_nao_e_achado_de_fora_de_dev(home: Path) -> None:
-    achados = coletar_projetos(home, home / "dev", HOJE)
+    achados = coletar_projetos(home, home / "dev", HOJE).achados
 
     assert _da_categoria(achados, Categoria.GIT_FORA_DE_DEV) == []
 
 
 def _caminhos(home: Path) -> set[Path]:
-    return {Path(a.caminho) for a in coletar_projetos(home, home / "dev", HOJE)}
+    return {Path(a.caminho) for a in coletar_projetos(home, home / "dev", HOJE).achados}
 
 
 @pytest.mark.parametrize(
@@ -278,7 +280,7 @@ def test_repo_corrompido_e_pulado_com_log_e_o_resto_segue(
 
 def test_git_ausente_pula_os_repos_com_log(home: Path, caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING, logger="antilixo.coletores.projetos"):
-        achados = coletar_projetos(home, home / "dev", HOJE, git="/nao/existe/git")
+        achados = coletar_projetos(home, home / "dev", HOJE, git="/nao/existe/git").achados
 
     assert achados == ()
     assert str(home / "dev" / "app") in caplog.text
@@ -296,7 +298,8 @@ def test_pasta_sem_permissao_e_pulada_com_log_e_o_resto_segue(
     trancada.chmod(0o700)  # deixa o pytest limpar o tmp_path
 
     assert saudavel in caminhos
-    assert str(trancada) in caplog.text
+    # O log passou a ser o resumo por pasta do HOME (2026-11-09), não o caminho completo.
+    assert "não lido: ~/Trancada: sem permissão para ler" in caplog.text
 
 
 def test_arquivo_rastreado_apagado_e_trabalho_nao_salvo(home: Path) -> None:
@@ -439,7 +442,7 @@ def test_config_do_repo_nao_executa_comando_na_coleta(
     # Stat diferente do índice: o git status relê o conteúdo e passaria pelo filtro.
     _ = _escrever(repo / "README.md", b"# projeto\n", dias_atras=IDADE_DO_MODELO + 1)
 
-    _ = coletar_projetos(home, home / "dev", HOJE)
+    _ = coletar_projetos(home, home / "dev", HOJE).achados
 
     assert not sinal.exists()
 
@@ -450,3 +453,33 @@ def test_pasta_library_fora_do_primeiro_nivel_e_varrida(home: Path) -> None:
     _ = shutil.copytree(home / "dev" / "app", destino, symlinks=True)
 
     assert destino in _caminhos(home)
+
+
+def test_pasta_do_home_bloqueada_vai_para_o_que_nao_deu_para_ler(home: Path) -> None:
+    # Achado da revisão de 2026-11-09: se o macOS negar ~/Documents ao LaunchAgent, os repos
+    # dali somem; o relatório precisa dizer que a pasta não foi lida.
+    documentos = home / "Documents"
+    documentos.mkdir(mode=0o000)
+    try:
+        leitura = coletar_projetos(home, home / "dev", HOJE)
+    finally:
+        documentos.chmod(0o700)
+
+    assert leitura.nao_lidas == ("~/Documents: sem permissão para ler (Privacidade do macOS)",)
+
+
+def test_subpastas_bloqueadas_sao_resumidas_pela_pasta_do_home(home: Path) -> None:
+    trancadas = [home / "Documents" / "a", home / "Documents" / "b", home / "Desktop" / "c"]
+    for pasta in trancadas:
+        pasta.mkdir(parents=True)
+        pasta.chmod(0o000)
+    try:
+        leitura = coletar_projetos(home, home / "dev", HOJE)
+    finally:
+        for pasta in trancadas:
+            pasta.chmod(0o700)
+
+    assert leitura.nao_lidas == (
+        "~/Desktop: 1 pasta sem permissão",
+        "~/Documents: 2 pastas sem permissão",
+    )

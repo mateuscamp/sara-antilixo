@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from antilixo.coletores.fotos import coletar_fotos_em_nuvem, resumir_pastas_nao_lidas
+from antilixo.coletores.fotos import coletar_fotos_em_nuvem
+from antilixo.coletores.nao_lidas import resumir_pastas_nao_lidas
 from antilixo.dominio.modelo import Achado, Categoria
 
 
