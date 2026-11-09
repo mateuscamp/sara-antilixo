@@ -20,19 +20,27 @@ INTERVALO_MINIMO_ENTRE_LIMPEZAS = timedelta(days=30)
 LIMIAR_DE_AVISO_BYTES = 2 * 10**9
 # ADR-0001, orçamento de disco: o estado guarda 60 dias de medições.
 JANELA_DE_MEDICOES = timedelta(days=60)
+# ADR-0001, governança: orçamento de disco avisa quando o disco cresce >20 GB em 30 dias.
 JANELA_DO_ORCAMENTO = timedelta(days=30)
-LIMIAR_DO_ORCAMENTO_BYTES = 20 * 10**9  # ADR-0001: disco cresce >20 GB em 30 dias
+LIMIAR_DO_ORCAMENTO_BYTES = 20 * 10**9
 
 
 def classificar(
     achados: tuple[Achado, ...], estado: Estado, hoje: date, uso_do_disco_bytes: int
 ) -> Veredito:
+    # ultima_limpeza depois de hoje é relógio errado numa execução anterior: conta como "pode
+    # limpar", para não travar a limpeza até essa data (decidido em 2026-11-09).
     pode_limpar = (
         estado.ultima_limpeza is None
+        or estado.ultima_limpeza > hoje
         or hoje - estado.ultima_limpeza >= INTERVALO_MINIMO_ENTRE_LIMPEZAS
     )
     apagar = _em_ordem(a for a in achados if pode_limpar and a.categoria is Categoria.CACHE)
-    avisos = _avisos(tuple(a for a in achados if a not in apagar), estado)
+    # Caches apagados nesta execução não contam para o aviso: mesma regra de `apagar`, por
+    # categoria, e não por igualdade de Achado (achado R3 da revisão de 2026-11-09).
+    avisos = _avisos(
+        tuple(a for a in achados if not (pode_limpar and a.categoria is Categoria.CACHE)), estado
+    )
     novo_estado = replace(
         estado,
         ultima_limpeza=hoje if apagar else estado.ultima_limpeza,
@@ -42,7 +50,9 @@ def classificar(
     return Veredito(
         apagar=apagar,
         avisos=avisos,
-        crescimento_do_disco_bytes=_crescimento_do_disco(novo_estado.medicoes, hoje),
+        crescimento_do_disco_bytes=_crescimento_do_disco(
+            novo_estado.medicoes, hoje, uso_do_disco_bytes
+        ),
         novo_estado=novo_estado,
     )
 
@@ -84,19 +94,24 @@ def _medicoes(
     medicoes: tuple[MedicaoDeDisco, ...], hoje: date, uso_do_disco_bytes: int
 ) -> tuple[MedicaoDeDisco, ...]:
     # A medição nova substitui a do mesmo dia (duas execuções num dia, decidido em 2026-11-09).
-    recentes = tuple(m for m in medicoes if hoje - JANELA_DE_MEDICOES <= m.dia and m.dia != hoje)
+    # Data futura (relógio errado numa execução anterior) é descartada (decidido em 2026-11-09).
+    # Ordenadas por dia, para quem ler o estado (achado R4 da revisão de 2026-11-09).
+    recentes = sorted(
+        (m for m in medicoes if hoje - JANELA_DE_MEDICOES <= m.dia < hoje), key=lambda m: m.dia
+    )
     return (*recentes, MedicaoDeDisco(hoje, uso_do_disco_bytes))
 
 
-def _crescimento_do_disco(medicoes: tuple[MedicaoDeDisco, ...], hoje: date) -> int | None:
-    """Crescimento desde a medição mais antiga dos últimos 30 dias (limite incluído).
+def _crescimento_do_disco(
+    medicoes: tuple[MedicaoDeDisco, ...], hoje: date, uso_do_disco_bytes: int
+) -> int | None:
+    """Crescimento do uso de hoje desde a medição mais antiga dos últimos 30 dias (limite incluído).
 
     `medicoes` já traz a de hoje, então a janela nunca fica vazia; sem outra, o crescimento é 0.
     """
     na_janela = [m for m in medicoes if m.dia >= hoje - JANELA_DO_ORCAMENTO]
     mais_antiga = min(na_janela, key=lambda m: m.dia)
-    atual = max(na_janela, key=lambda m: m.dia)
-    crescimento = atual.usado_bytes - mais_antiga.usado_bytes
+    crescimento = uso_do_disco_bytes - mais_antiga.usado_bytes
     return crescimento if crescimento > LIMIAR_DO_ORCAMENTO_BYTES else None
 
 

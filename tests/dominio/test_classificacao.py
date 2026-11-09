@@ -253,3 +253,37 @@ def test_avisos_seguem_a_ordem_de_declaracao_das_categorias() -> None:
         Categoria.GIT_FORA_DE_DEV,
         Categoria.FOTOS_EM_NUVEM,
     ]
+
+
+def test_medicao_com_data_futura_sai_do_estado() -> None:
+    futura = MedicaoDeDisco(date(2026, 12, 1), 50 * GB)
+
+    veredito = _classificar(estado=Estado(medicoes=(futura,)), disco=100 * GB)
+
+    assert veredito.novo_estado.medicoes == (MedicaoDeDisco(HOJE, 100 * GB),)
+
+
+def test_crescimento_compara_o_uso_de_hoje_mesmo_com_medicao_futura_no_estado() -> None:
+    inicio = MedicaoDeDisco(date(2026, 10, 15), 100 * GB)
+    futura = MedicaoDeDisco(date(2026, 12, 1), 50 * GB)
+
+    veredito = _classificar(estado=Estado(medicoes=(inicio, futura)), disco=130 * GB)
+
+    assert veredito.crescimento_do_disco_bytes == 30 * GB
+
+
+def test_ultima_limpeza_depois_de_hoje_permite_limpar() -> None:
+    cache = _achado(Categoria.CACHE, ".npm/_cacache", 1 * GB)
+
+    veredito = _classificar(cache, estado=Estado(ultima_limpeza=date(2027, 6, 1)))
+
+    assert veredito.apagar == (cache,)
+
+
+def test_medicoes_do_estado_ficam_ordenadas_por_dia() -> None:
+    depois = MedicaoDeDisco(date(2026, 11, 2), 105 * GB)
+    antes = MedicaoDeDisco(date(2026, 10, 20), 100 * GB)
+
+    veredito = _classificar(estado=Estado(medicoes=(depois, antes)), disco=110 * GB)
+
+    assert veredito.novo_estado.medicoes == (antes, depois, MedicaoDeDisco(HOJE, 110 * GB))
