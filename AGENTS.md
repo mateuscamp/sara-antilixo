@@ -24,6 +24,16 @@ Arquitetura: script local, LaunchAgent semanal · Quantum: 1. ADRs em `docs/adr/
 - Repo com commit sem push, stash ou arquivo modificado nunca é alvo, nem de aviso de "apagar".
 - O Claude lê o relatório; nunca executa limpeza nem chama `acoes/` fora de teste.
 
+## Regras do domínio (decididas em 2026-11-09)
+
+- Aviso: quando a soma de uma categoria passa de 2 GB. O relatório lista os itens dela.
+- Notificação: achado já avisado só volta a notificar se crescer ≥20% desde o último aviso.
+  Continua no relatório toda semana. O estado guarda o tamanho no momento do aviso.
+- Órfão da `~/Library`: bundle id da pasta sem app correspondente em `/Applications` ou
+  `~/Applications` (lido de `Contents/Info.plist` com `plistlib`). Pastas do sistema
+  (`com.apple.*` e a lista de exceções em `dominio/`) nunca são órfãs.
+- Regra que não está aqui nem no ADR: perguntar, não inferir.
+
 ## Contextos e fronteiras
 
 | Pasta | Papel | Padrão | Testes |

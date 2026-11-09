@@ -83,9 +83,13 @@ alguma deleção acontecer fora da allowlist.
 | Instalação reproduzível | `test_install_idempotente` com HOME temporário (pendente) | `make check` | Rodar `install.sh` duas vezes muda algo na segunda |
 | O detector está rodando | Heartbeat no `.zshrc` (pendente) | Cada shell aberto | Último relatório com >8 dias |
 | Orçamento de disco | Aviso no relatório (pendente) | Execução semanal | Disco cresce >20 GB em 30 dias |
+| Detectar cedo sem ruído | Testes da classificação (pendentes) | `make check` | Categoria somada >2 GB não vira aviso; achado já avisado notifica de novo sem crescer ≥20%; pasta `com.apple.*` ou da lista de exceções vira órfã |
 
 Regra derivada no `AGENTS.md`: seção "Segurança da limpeza".
 
 ## Notas
+
+Regras do domínio decididas em 2026-11-09 (aviso por categoria somada >2 GB, nova notificação
+só com crescimento ≥20%, órfão por bundle id com lista de exceções do sistema): ver `AGENTS.md`.
 
 Autor: Mateus Campelo · Criado em: 2026-11-08 · Aprovado em: 2026-11-08
