@@ -1,0 +1,119 @@
+[project]
+name = "antilixo"
+version = "0.1.0"
+description = "Detecta lixo acumulado no Mac e avisa; só apaga caches recriáveis da allowlist."
+readme = "README.md"
+authors = [
+    { name = "Mateus Campelo", email = "mateuscampelob@gmail.com" }
+]
+requires-python = ">=3.15"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "basedpyright>=1.40.2",
+    "import-linter>=2.16",
+    "pytest>=9.2.0",
+    "ruff>=0.17.4",
+]
+
+# Trilho python-on-rails (copiado da skill em 2026-11-08).
+# Validado em 2026-11-03 com uv 0.11.9, ruff 0.17.3, basedpyright 1.40.2, pytest 9.2.
+# Ferramentas entram no lock, não no sistema:
+#   uv add --dev ruff basedpyright pytest import-linter
+# Afrouxar qualquer linha daqui é desvio: exige ADR e registro (ver references/desvios-e-decisoes.md).
+# O scripts/conferir_trilho.py da skill compara o projeto com este arquivo e reprova o afrouxamento.
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Lista explícita, não "ALL": regra nova do ruff entra por decisão, não por upgrade.
+select = [
+  "F", "E", "W", "I", "N", "UP",   # base: erros, estilo, imports, nomes, sintaxe moderna
+  "ANN",                           # anotação em toda função; ANN401 proíbe Any
+  "S",                             # segurança (bandit): eval, shell=True, senha no código, pickle
+  "BLE", "TRY", "EM",              # exceção: nada de except amplo, raise from, mensagem útil
+  "B", "A", "ARG", "RET", "SIM", "PIE", "C4", "PERF", "FURB", "FLY", "ISC", "RUF",
+  "DTZ",                           # datetime sem fuso
+  "T10", "T20",                    # debugger e print esquecidos
+  "LOG", "G",                      # logging bem usado
+  "PT",                            # pytest idiomático
+  "PTH",                           # pathlib
+  "ERA",                           # código comentado
+  "PGH",                           # supressão sem código de regra
+  "TID",                           # imports absolutos
+  "ASYNC",                         # bloqueio dentro de async
+  "FBT",                           # bool posicional (f(True) não diz nada)
+  "PL", "C90",                     # complexidade e armadilhas do pylint
+]
+ignore = [
+  "TRY003",  # mensagem longa na exceção é o que queremos: valor recebido e formato esperado
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "ANN401"]  # assert, número mágico e Any de fixture em teste
+"src/antilixo/config.py" = ["TID251"]        # o único módulo que lê o ambiente
+
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+# Config lida num lugar só: fora do config.py, ler o ambiente reprova. Repassar o ambiente a um
+# subprocesso é legítimo e leva `# noqa: TID251  # motivo: ...`.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"os.environ".msg = "Só o config.py lê o ambiente; o resto recebe o objeto de config."
+"os.environb".msg = "Só o config.py lê o ambiente; o resto recebe o objeto de config."
+"os.getenv".msg = "Só o config.py lê o ambiente; o resto recebe o objeto de config."
+"os.getenvb".msg = "Só o config.py lê o ambiente; o resto recebe o objeto de config."
+
+[tool.basedpyright]
+typeCheckingMode = "recommended"  # o modo mais estrito pensado para uso diário
+pythonVersion = "3.15"            # igual ao .python-version
+include = ["src", "tests"]
+enableTypeIgnoreComments = false  # só `# pyright: ignore[regra]`, que diz qual regra cala
+reportIgnoreCommentWithoutRule = "error"
+reportUnnecessaryTypeIgnoreComment = "error"
+failOnWarnings = true             # sem isso, warning sai com código 0 e o agente segue
+
+[tool.pytest.ini_options]
+addopts = ["--strict-markers", "--strict-config", "-ra"]
+xfail_strict = true          # xfail que passa reprova: não vira esconderijo
+# Sem o registro, `pytest -m "not e2e"` do portão não roda nada e sai com 4 (--strict-markers).
+markers = ["e2e: teste funcional (navegador ou servidor vivo); fora do make check, roda no make e2e"]
+testpaths = ["tests"]
+filterwarnings = ["error"]   # depreciação vira falha hoje, não quebra amanhã
+
+# Domínio puro (padrão com desvio declarado). Apagar se o projeto declarou o desvio.
+[tool.importlinter]
+root_package = "antilixo"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "domínio não conhece infra, config nem biblioteca de borda"
+type = "forbidden"
+# ADR-0001: dominio/ é o núcleo (allowlist e classificação); coletores/, acoes/ e relatorio/ são borda.
+source_modules = ["antilixo.dominio"]
+# Borda do projeto mais a stdlib que faz E/S. `datetime` fica de fora: o tipo é legítimo no domínio
+# (o `Relogio`), e `datetime.now` ali é achado de revisão.
+forbidden_modules = [
+  # "antilixo.config" volta a esta lista no mesmo commit que criar src/antilixo/config.py
+  # (o import-linter recusa módulo inexistente).
+  "antilixo.coletores", "antilixo.acoes", "antilixo.relatorio",
+  "pydantic", "httpx", "os", "socket", "subprocess", "urllib", "http", "shutil",
+]
+
+# ADR-0001: só acoes/ apaga. Quem não é acoes/ não importa shutil (rmtree).
+# test_so_acoes_apaga_arquivos (pendente) cobre também Path.unlink/rmdir, que import não pega.
+[[tool.importlinter.contracts]]
+name = "só acoes apaga arquivos"
+type = "forbidden"
+source_modules = ["antilixo.coletores", "antilixo.dominio", "antilixo.relatorio"]
+forbidden_modules = ["shutil", "antilixo.acoes"]

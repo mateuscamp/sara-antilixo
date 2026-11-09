@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "PATH=\"$HOME/.local/bin:$PATH\" \"$CLAUDE_PROJECT_DIR\"/scripts/hook_portao.sh",
+            "timeout": 300
+          }
+        ]
+      }
+    ]
+  }
+}
