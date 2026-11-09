@@ -8,7 +8,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from antilixo.execucao import Ambiente, executar
+from antilixo.dominio.modelo import Categoria
+from antilixo.execucao import Ambiente, coletar_tudo, executar
 from antilixo.relatorio.estado_em_disco import ler_estado
 
 AGORA = datetime(2026, 11, 15, 10, 0, tzinfo=UTC)
@@ -89,3 +90,15 @@ def test_python_m_antilixo_roda_num_home_vazio(tmp_path: Path) -> None:
 
     assert concluido.returncode == 0, concluido.stderr.decode()
     assert (_estado(tmp_path) / "relatorio.md").is_file()
+
+
+def test_coleta_inclui_repositorio_git_fora_de_dev(tmp_path: Path) -> None:
+    repo = tmp_path / "Documents" / "projeto"
+    repo.mkdir(parents=True)
+    _ = subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)  # noqa: S603, S607  # motivo: git do PATH com lista fixa, só para montar o repo de teste
+
+    achados = coletar_tudo(_ambiente(tmp_path, ExecutorFalso()))
+
+    assert [
+        (a.categoria, a.caminho) for a in achados if a.categoria is Categoria.GIT_FORA_DE_DEV
+    ] == [(Categoria.GIT_FORA_DE_DEV, repo)]

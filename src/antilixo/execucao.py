@@ -11,6 +11,7 @@ from antilixo.coletores.caches import coletar_caches
 from antilixo.coletores.disco import medir_uso_do_disco
 from antilixo.coletores.fotos import coletar_fotos_em_nuvem
 from antilixo.coletores.library import coletar_orfaos_library
+from antilixo.coletores.projetos import coletar_projetos
 from antilixo.dominio.classificacao import classificar
 from antilixo.dominio.modelo import (
     Achado,
@@ -41,7 +42,7 @@ def executar(ambiente: Ambiente) -> None:
     pasta_de_estado = ambiente.home / ".local" / "state" / "sara-antilixo"
     hoje = ambiente.agora.date()
     estado = ler_estado(pasta_de_estado, hoje=hoje)
-    veredito = classificar(_coletar(ambiente), estado, hoje, medir_uso_do_disco(ambiente.home))
+    veredito = classificar(coletar_tudo(ambiente), estado, hoje, medir_uso_do_disco(ambiente.home))
     resultado = _limpar_todos(veredito.apagar, ambiente.home)
     texto = montar_relatorio(veredito, resultado, ambiente.agora)
     _ = gravar_relatorio(texto, pasta_de_estado, ambiente.agora)
@@ -49,12 +50,13 @@ def executar(ambiente: Ambiente) -> None:
     _ = notificar(veredito, resultado, ambiente.executor)
 
 
-def _coletar(ambiente: Ambiente) -> tuple[Achado, ...]:
+def coletar_tudo(ambiente: Ambiente) -> tuple[Achado, ...]:
     home = ambiente.home
     return (
         *coletar_caches(home),
         *coletar_fotos_em_nuvem(home),
         *coletar_orfaos_library(home, ambiente.pastas_de_apps),
+        *coletar_projetos(home, home / "dev", ambiente.agora.date()),
     )
 
 
