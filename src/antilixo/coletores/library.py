@@ -6,6 +6,7 @@ Origem: 4,4 GB de dados de apps desinstalados na ~/Library na formatação de 20
 import logging
 import plistlib
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -28,8 +29,13 @@ _PASTAS_DA_LIBRARY = (
 
 
 def coletar_orfaos_library(home: Path, pastas_de_apps: tuple[Path, ...]) -> tuple[Achado, ...]:
-    """Pastas da ~/Library com nome de bundle id sem app instalado correspondente."""
-    instalados = _bundle_ids_instalados(pastas_de_apps)
+    """Pastas da ~/Library sem app instalado correspondente.
+
+    Nome com forma de bundle id casa com o bundle id do app (ou o prefixo dele com ponto); os
+    outros nomes (Notion, Comet) casam com o nome do app. Regras de 2026-11-09, aprovadas pela
+    sessão-mãe: falso positivo é aceitável, porque vira só aviso e nunca apaga.
+    """
+    instalados = _apps_instalados(pastas_de_apps)
     return tuple(
         Achado(
             Categoria.ORFAO_LIBRARY,
@@ -39,9 +45,7 @@ def coletar_orfaos_library(home: Path, pastas_de_apps: tuple[Path, ...]) -> tupl
         )
         for subpasta in _PASTAS_DA_LIBRARY
         for pasta in _subpastas(home / "Library" / subpasta)
-        if _tem_forma_de_bundle_id(pasta.name)
-        and not _e_do_sistema(pasta.name)
-        and not _e_de_app_instalado(pasta.name, instalados)
+        if not _e_do_sistema(pasta.name) and not _e_de_app_instalado(pasta.name, instalados)
     )
 
 
@@ -62,14 +66,28 @@ def _e_do_sistema(nome: str) -> bool:
     return chave.startswith("com.apple.") or chave in _EXCECOES
 
 
-def _e_de_app_instalado(nome: str, instalados: frozenset[str]) -> bool:
+@dataclass(frozen=True, slots=True)
+class _Instalados:
+    """O que identifica os apps instalados, já em casefold."""
+
+    bundle_ids: frozenset[str]
+    nomes: frozenset[str]  # nome do .app sem extensão, CFBundleName e CFBundleDisplayName
+
+
+def _e_de_app_instalado(nome: str, instalados: _Instalados) -> bool:
+    chave = nome.casefold()
+    if not _tem_forma_de_bundle_id(nome):
+        return chave in instalados.nomes
+    return _e_de_bundle_id_instalado(chave, instalados.bundle_ids)
+
+
+def _e_de_bundle_id_instalado(chave: str, instalados: frozenset[str]) -> bool:
     """O nome é o bundle id de um app instalado, ou começa por ele seguido de ponto.
 
     O ponto separa `com.microsoft.VSCode.ShipIt` (do VSCode) de `com.microsoft.VSCodeInsiders`
     (outro app). Sem diferenciar maiúsculas, como o APFS padrão e o próprio bundle id.
     Aprovado pela sessão-mãe em 2026-11-09.
     """
-    chave = nome.casefold()
     return any(chave == i or chave.startswith(f"{i}.") for i in instalados)
 
 
@@ -80,9 +98,15 @@ def _subpastas(raiz: Path) -> list[Path]:
     return sorted(p for p in raiz.iterdir() if p.is_dir() and not p.is_symlink())
 
 
-def _bundle_ids_instalados(pastas_de_apps: tuple[Path, ...]) -> frozenset[str]:
-    ids = (_ler_bundle_id(b) for pasta in pastas_de_apps for b in _bundles_sob(pasta))
-    return frozenset(i.casefold() for i in ids if i is not None)
+def _apps_instalados(pastas_de_apps: tuple[Path, ...]) -> _Instalados:
+    bundle_ids: set[str] = set()
+    nomes: set[str] = set()
+    for bundle in (b for pasta in pastas_de_apps for b in _bundles_sob(pasta)):
+        nomes.add(bundle.stem.casefold())
+        info = _ler_info_plist(bundle)
+        bundle_ids.update(i.casefold() for i in _bundle_id(info))
+        nomes.update(n.casefold() for n in _nomes_declarados(info))
+    return _Instalados(frozenset(bundle_ids), frozenset(nomes))
 
 
 # Bundles dentro de um .app com bundle id próprio, que deixa dados na ~/Library (extensões e
@@ -107,17 +131,36 @@ def _bundles_sob(pasta: Path) -> list[Path]:
     return bundles
 
 
-def _ler_bundle_id(app: Path) -> str | None:
-    """`CFBundleIdentifier` do app, ou None se o Info.plist faltar ou não for legível."""
+def _bundle_id(info: object) -> list[str]:
+    match info:
+        case {"CFBundleIdentifier": str(bundle_id)}:
+            return [bundle_id]
+        case _:
+            return []
+
+
+def _nomes_declarados(info: object) -> list[str]:
+    """`CFBundleName` e `CFBundleDisplayName`, os que existirem como texto."""
+    nomes: list[str] = []
+    match info:
+        case {"CFBundleName": str(nome)}:
+            nomes.append(nome)
+        case _:
+            pass
+    match info:
+        case {"CFBundleDisplayName": str(nome)}:
+            nomes.append(nome)
+        case _:
+            pass
+    return nomes
+
+
+def _ler_info_plist(app: Path) -> object:
+    """O Info.plist do app, ou None se faltar ou não for legível."""
     info_plist = app / "Contents" / "Info.plist"
     try:
         with info_plist.open("rb") as arquivo:
-            info = cast("object", plistlib.load(arquivo))  # motivo: plistlib dá Any; match confere
+            return cast("object", plistlib.load(arquivo))  # motivo: plistlib dá Any; match confere
     except OSError, plistlib.InvalidFileException:
         _log.info("Info.plist ilegível, app ignorado: %s", info_plist)
         return None
-    match info:
-        case {"CFBundleIdentifier": str(bundle_id)}:
-            return bundle_id
-        case _:
-            return None

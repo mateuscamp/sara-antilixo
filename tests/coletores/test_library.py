@@ -127,12 +127,49 @@ def test_symlink_na_library_nao_e_orfao(tmp_path: Path) -> None:
     assert coletar_orfaos_library(home, ()) == ()
 
 
-@pytest.mark.parametrize("nome", ["Notion", "Comet", "Google", "1.2.3", ".com.oculta"])
-def test_pasta_sem_forma_de_bundle_id_e_ignorada(tmp_path: Path, nome: str) -> None:
+@pytest.mark.parametrize("nome", ["Notion", "Comet", "Tibia", "1.2.3"])
+def test_pasta_com_nome_sem_app_correspondente_e_orfa(tmp_path: Path, nome: str) -> None:
+    # Regra (a) de 2026-11-09: substitui "pasta sem forma de bundle id é ignorada".
     home = tmp_path / "home"
-    _ = _dados(home, "Application Support", nome)
+    apps = tmp_path / "Applications"
+    _ = _instalar_app(apps, "Outro", "com.exemplo.Outro")
+    orfa = _dados(home, "Application Support", nome, 12)
 
-    assert coletar_orfaos_library(home, ()) == ()
+    achados = coletar_orfaos_library(home, (apps,))
+
+    assert achados == (
+        Achado(
+            Categoria.ORFAO_LIBRARY, orfa, 12, f"{nome} sem app instalado (Application Support)"
+        ),
+    )
+
+
+def _instalar_app_com_nomes(pasta_de_apps: Path, arquivo: str, nomes: dict[str, str]) -> None:
+    contents = pasta_de_apps / f"{arquivo}.app" / "Contents"
+    contents.mkdir(parents=True)
+    with (contents / "Info.plist").open("wb") as saida:
+        plistlib.dump({"CFBundleIdentifier": "com.exemplo.qualquer", **nomes}, saida)
+
+
+@pytest.mark.parametrize(
+    ("arquivo", "nomes", "pasta"),
+    [
+        ("Notion", {}, "Notion"),
+        ("Notion", {}, "notion"),
+        ("Navegador", {"CFBundleName": "Comet"}, "Comet"),
+        ("Navegador", {"CFBundleDisplayName": "Tibia"}, "TIBIA"),
+    ],
+    ids=["nome-do-app", "nome-do-app-minusculo", "cfbundlename", "cfbundledisplayname"],
+)
+def test_pasta_com_nome_de_app_instalado_nao_e_orfa(
+    tmp_path: Path, arquivo: str, nomes: dict[str, str], pasta: str
+) -> None:
+    home = tmp_path / "home"
+    apps = tmp_path / "Applications"
+    _instalar_app_com_nomes(apps, arquivo, nomes)
+    _ = _dados(home, "Caches", pasta)
+
+    assert coletar_orfaos_library(home, (apps,)) == ()
 
 
 def test_pasta_da_apple_nunca_e_orfa(tmp_path: Path) -> None:
