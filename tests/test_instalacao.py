@@ -27,8 +27,10 @@ printf '%s %s\\n' "$(basename "$0")" "$*" >> "$FALSO_LOG"
 {extra}
 exit 0
 """
-# O launchctl de verdade falha no bootout de agente que não está carregado.
-_EXTRA_LAUNCHCTL = '[[ "$1" == bootout ]] && exit 3'
+# O launchctl de verdade falha no bootout de agente que não está carregado. O bootstrap falha
+# (código 5, como o de verdade) quando o teste pede.
+_EXTRA_LAUNCHCTL = """[[ "$1" == bootout ]] && exit 3
+[[ "$1" == bootstrap && -n "${FALSO_BOOTSTRAP_FALHA:-}" ]] && exit 5"""
 # O brew falso "instala" o uv falso numa pasta do PATH, como o brew de verdade faz.
 _EXTRA_BREW = """if [[ "$1" == install && "$2" == uv ]]; then
   cp "$FALSO_UV" "$FALSO_INSTALADOS/uv"
@@ -43,6 +45,8 @@ class Falsos:
     uv: Path
     brew: Path
     launchctl: Path
+    # `sleep` falso: as esperas entre tentativas do bootstrap não atrasam a suíte.
+    sleep: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +57,7 @@ class Caixa:
     pasta: Path
     falsos: Falsos
     caminhos: tuple[Path, ...]
+    bootstrap_falha: bool = False
 
     @property
     def plist(self) -> Path:
@@ -71,6 +76,11 @@ class Caixa:
         """Onde o brew falso põe o uv que instala."""
         return self.pasta / "instalados"
 
+    @property
+    def temporarios(self) -> Path:
+        """TMPDIR do install.sh, para ver o que o mktemp deixa para trás."""
+        return self.pasta / "tmp"
+
     def chamadas(self) -> list[str]:
         log = self.pasta / "chamadas.log"
         return log.read_text().splitlines() if log.exists() else []
@@ -84,6 +94,8 @@ class Caixa:
             "FALSO_LOG": str(self.pasta / "chamadas.log"),
             "FALSO_UV": str(self.falsos.uv / "uv"),
             "FALSO_INSTALADOS": str(self.instalados),
+            "FALSO_BOOTSTRAP_FALHA": "1" if self.bootstrap_falha else "",
+            "TMPDIR": str(self.temporarios),
         }
 
 
@@ -102,21 +114,36 @@ def falsos(tmp_path_factory: pytest.TempPathFactory) -> Falsos:
         uv=_escrever_falso(raiz / "uv", "uv"),
         brew=_escrever_falso(raiz / "brew", "brew", _EXTRA_BREW),
         launchctl=_escrever_falso(raiz / "launchctl", "launchctl", _EXTRA_LAUNCHCTL),
+        sleep=_escrever_falso(raiz / "sleep", "sleep"),
     )
 
 
-def _caixa(raiz: Path, falsos: Falsos, *, com_uv: bool = True, com_brew: bool = True) -> Caixa:
+def _caixa(
+    raiz: Path,
+    falsos: Falsos,
+    *,
+    com_uv: bool = True,
+    com_brew: bool = True,
+    bootstrap_falha: bool = False,
+) -> Caixa:
     home = raiz / "home"
     pasta = raiz / "caixa"
     home.mkdir()
     pasta.mkdir()
     (pasta / "instalados").mkdir()
-    caminhos = [pasta / "instalados", falsos.launchctl]
+    (pasta / "tmp").mkdir()
+    caminhos = [pasta / "instalados", falsos.launchctl, falsos.sleep]
     if com_uv:
         caminhos.append(falsos.uv)
     if com_brew:
         caminhos.append(falsos.brew)
-    return Caixa(home=home, pasta=pasta, falsos=falsos, caminhos=tuple(caminhos))
+    return Caixa(
+        home=home,
+        pasta=pasta,
+        falsos=falsos,
+        caminhos=tuple(caminhos),
+        bootstrap_falha=bootstrap_falha,
+    )
 
 
 def _instalar(caixa: Caixa) -> subprocess.CompletedProcess[str]:
@@ -199,6 +226,23 @@ def test_install_recarrega_agente_mesmo_sem_estar_carregado(caixa: Caixa) -> Non
     ]
 
 
+def test_install_desiste_do_bootstrap_apos_3_tentativas_sem_mexer_no_zshrc(
+    tmp_path: Path, falsos: Falsos
+) -> None:
+    caixa = _caixa(tmp_path, falsos, bootstrap_falha=True)
+    _ = caixa.zshrc.write_text(ZSHRC_DO_USUARIO)
+
+    resultado = _instalar(caixa)
+
+    assert resultado.returncode != 0
+    assert "bootstrap falhou 3 vezes" in resultado.stderr
+    assert f"launchctl print gui/{os.getuid()}/{ROTULO}" in resultado.stderr
+    chamadas = caixa.chamadas()
+    assert sum(c.startswith("launchctl bootstrap") for c in chamadas) == 3
+    assert chamadas.count("sleep 1") == 2
+    assert caixa.zshrc.read_text() == ZSHRC_DO_USUARIO
+
+
 def test_install_sincroniza_dependencias_pelo_lock(caixa: Caixa) -> None:
     resultado = _instalar(caixa)
 
@@ -246,6 +290,25 @@ def test_install_idempotente(caixa: Caixa) -> None:
     assert zshrc_1.count(INICIO_BLOCO) == 1
     assert zshrc_1.count(FIM_BLOCO) == 1
     assert zshrc_1.startswith(ZSHRC_DO_USUARIO)
+    assert list(caixa.temporarios.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "sobra", [" ", "  \t", "\r", "\f"], ids=["espaco", "espaco-e-tab", "crlf", "form-feed"]
+)
+def test_install_reconhece_marcador_com_espaco_no_fim(caixa: Caixa, sobra: str) -> None:
+    # Editor que deixa espaço (ou \r) no fim da linha não pode gerar um segundo bloco.
+    depois = "export DEPOIS=1\n"
+    antigo = f"{INICIO_BLOCO}{sobra}\nvelho\n{FIM_BLOCO}{sobra}\n"
+    _ = caixa.zshrc.write_text(f"{ZSHRC_DO_USUARIO}{antigo}{depois}")
+
+    resultado = _instalar(caixa)
+
+    assert resultado.returncode == 0, resultado.stderr
+    heartbeat = (REPO / "instalacao" / "heartbeat.zsh").read_text()
+    assert caixa.zshrc.read_text() == (
+        f"{ZSHRC_DO_USUARIO}{INICIO_BLOCO}\n{heartbeat.rstrip()}\n{FIM_BLOCO}\n{depois}"
+    )
 
 
 def test_install_troca_bloco_antigo_no_mesmo_lugar(caixa: Caixa) -> None:
@@ -334,3 +397,15 @@ def test_heartbeat_avisa_sem_relatorio_e_nao_quebra_o_shell(
 
     assert terminal.returncode == 0
     assert "sara-antilixo" in terminal.stderr
+
+
+def test_install_que_aborta_no_zshrc_nao_deixa_temporario(caixa: Caixa) -> None:
+    # Só leitura: o `cat >` por cima do ~/.zshrc falha depois do mktemp, e o set -e aborta.
+    _ = caixa.zshrc.write_text(ZSHRC_DO_USUARIO)
+    caixa.zshrc.chmod(0o444)
+
+    resultado = _instalar(caixa)
+
+    assert resultado.returncode != 0
+    assert list(caixa.temporarios.iterdir()) == []
+    assert caixa.zshrc.read_text() == ZSHRC_DO_USUARIO

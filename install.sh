@@ -10,6 +10,19 @@ plist="$HOME/Library/LaunchAgents/$rotulo.plist"
 zshrc="$HOME/.zshrc"
 inicio_bloco="# >>> sara-antilixo >>>"
 fim_bloco="# <<< sara-antilixo <<<"
+# Casam a linha do marcador mesmo com espaço, tab ou \r no fim (editor, CRLF): sem isso, um
+# marcador assim não seria visto e o install.sh acrescentaria um segundo bloco. Os marcadores não
+# têm caractere especial de ERE.
+padrao_inicio="^$inicio_bloco[[:space:]]*\$"
+padrao_fim="^$fim_bloco[[:space:]]*\$"
+
+# Cópia de trabalho do ~/.zshrc. Global para o trap: se o script abortar no meio (disco cheio,
+# ~/.zshrc só leitura), ela não fica esquecida no TMPDIR.
+temporario=""
+limpar_temporario() {
+  [[ -z "$temporario" ]] || rm -f -- "$temporario"
+}
+trap limpar_temporario EXIT
 
 # Troca toda ocorrência de $2 por $3 em $1. Sem ${x//a/b}: no bash 5.2 o `&` da troca vira o trecho
 # casado, e um caminho com `&` sairia corrompido.
@@ -65,8 +78,10 @@ recarregar_agente() {
     launchctl bootstrap "$dominio" "$plist" && return 0
     [[ "$tentativa" == 3 ]] || sleep 1
   done
-  echo "install.sh: o launchctl recusou $plist; veja 'launchctl print $dominio/$rotulo'." >&2
-  return 1
+  # Para antes do ~/.zshrc: o heartbeat só entra quando o agente que ele vigia está carregado.
+  echo "install.sh: o launchctl bootstrap falhou 3 vezes para $plist." \
+    "Veja 'launchctl print $dominio/$rotulo' e rode ./install.sh de novo." >&2
+  exit 1
 }
 
 # Confere os marcadores antes de mexer em qualquer coisa: com um marcador sem par, fora de ordem ou
@@ -74,8 +89,8 @@ recarregar_agente() {
 conferir_marcadores() {
   [[ -f "$zshrc" ]] || return 0
   local inicios fins
-  inicios="$(grep -nxF "$inicio_bloco" "$zshrc" | cut -d: -f1 | tr '\n' ' ' || true)"
-  fins="$(grep -nxF "$fim_bloco" "$zshrc" | cut -d: -f1 | tr '\n' ' ' || true)"
+  inicios="$(grep -nE "$padrao_inicio" "$zshrc" | cut -d: -f1 | tr '\n' ' ' || true)"
+  fins="$(grep -nE "$padrao_fim" "$zshrc" | cut -d: -f1 | tr '\n' ' ' || true)"
   [[ -z "$inicios" && -z "$fins" ]] && return 0
   # Um número de linha só em cada (o espaço final vem do tr) e o início antes do fim.
   if [[ "$inicios" =~ ^[0-9]+\ $ && "$fins" =~ ^[0-9]+\ $ ]] && ((${inicios% } < ${fins% })); then
@@ -90,24 +105,27 @@ conferir_marcadores() {
 # Põe o heartbeat no ~/.zshrc entre os marcadores, trocando o bloco anterior no mesmo lugar.
 # Escreve por cima com `cat >`, e não com `mv`: um ~/.zshrc que é symlink (dotfiles) continua symlink.
 escrever_bloco_zshrc() {
-  local bloco novo
+  local bloco
   bloco="$inicio_bloco"$'\n'"$(< "$repo/instalacao/heartbeat.zsh")"$'\n'"$fim_bloco"
   touch "$zshrc"
-  novo="$(mktemp)"
-  if grep -qxF "$inicio_bloco" "$zshrc"; then
+  # Com modelo explícito: o mktemp do macOS sem argumento ignora o TMPDIR.
+  temporario="$(mktemp "${TMPDIR:-/tmp}/sara-antilixo-zshrc.XXXXXX")"
+  if grep -qE "$padrao_inicio" "$zshrc"; then
     INICIO="$inicio_bloco" FIM="$fim_bloco" BLOCO="$bloco" awk '
-      $0 == ENVIRON["INICIO"] { print ENVIRON["BLOCO"]; pulando = 1; next }
-      $0 == ENVIRON["FIM"] { pulando = 0; next }
+      # A mesma classe do grep acima: com classes diferentes, um marcador visto por um e não pelo
+      # outro deixaria o bloco velho no lugar sem aviso.
+      { linha = $0; sub(/[[:space:]]+$/, "", linha) }
+      linha == ENVIRON["INICIO"] { print ENVIRON["BLOCO"]; pulando = 1; next }
+      linha == ENVIRON["FIM"] { pulando = 0; next }
       !pulando { print }
-    ' "$zshrc" > "$novo"
+    ' "$zshrc" > "$temporario"
   else
-    cat "$zshrc" > "$novo"
+    cat "$zshrc" > "$temporario"
     # Arquivo sem quebra de linha no fim: o marcador grudaria na última linha do usuário.
-    [[ -s "$zshrc" && -n "$(tail -c 1 "$zshrc")" ]] && printf '\n' >> "$novo"
-    printf '%s\n' "$bloco" >> "$novo"
+    [[ -s "$zshrc" && -n "$(tail -c 1 "$zshrc")" ]] && printf '\n' >> "$temporario"
+    printf '%s\n' "$bloco" >> "$temporario"
   fi
-  cat "$novo" > "$zshrc"
-  rm -f "$novo"
+  cat "$temporario" > "$zshrc"
 }
 
 conferir_marcadores
