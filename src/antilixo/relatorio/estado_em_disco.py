@@ -97,11 +97,24 @@ def escrever_atomico(destino: Path, texto: str) -> None:
     """Publica o texto só depois de sincronizar o temporário fixo ao lado."""
     destino.parent.mkdir(parents=True, exist_ok=True)
     temporario = destino.with_name(destino.name + ".tmp")
-    with temporario.open("w", encoding="utf-8") as arquivo:
+    # O_NOFOLLOW: um symlink plantado no nome fixo faz a escrita falhar em vez de sobrescrever
+    # o alvo dele (achado A1 da auditoria de 2026-11-09). Nome fixo, e não único com O_EXCL,
+    # porque relatorio/ não apaga: um temporário de falha anterior é reaproveitado aqui.
+    descritor = os.open(
+        temporario, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600
+    )
+    with os.fdopen(descritor, "w", encoding="utf-8") as arquivo:
         _ = arquivo.write(texto)
         arquivo.flush()
         os.fsync(arquivo.fileno())
     _ = temporario.replace(destino)
+    # Sem o fsync da pasta, uma queda de energia logo depois pode desfazer a troca de nome
+    # (achado A4 da auditoria de 2026-11-09).
+    pasta = os.open(destino.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        os.fsync(pasta)
+    finally:
+        os.close(pasta)
 
 
 def ler_estado(pasta_de_estado: Path, *, hoje: date) -> Estado:
@@ -111,6 +124,11 @@ def ler_estado(pasta_de_estado: Path, *, hoje: date) -> Estado:
         try:
             texto = destino.read_text(encoding="utf-8")
         except FileNotFoundError:
+            return Estado()
+        except OSError as erro:
+            # Ilegível não é corrompido: nada a preservar renomeando, e a semana não pode
+            # travar (achado A2 da auditoria de 2026-11-09). Fica para a pessoa olhar.
+            logger.warning("Estado ilegível em %s, seguindo com estado vazio: %s", destino, erro)
             return Estado()
         dados = cast(object, json.loads(texto))  # motivo: isola Any antes da validação estrutural.
         return _estado(dados)

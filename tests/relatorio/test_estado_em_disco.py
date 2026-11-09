@@ -1,5 +1,6 @@
 import json
 import logging
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 
@@ -237,3 +238,49 @@ def test_json_que_o_parser_recusa_nao_trava_a_execucao(tmp_path: Path, conteudo:
 
     assert estado == Estado()
     assert (tmp_path / "estado.json.corrompido-20261109").read_bytes() == conteudo
+
+
+def test_temporario_plantado_como_symlink_falha_sem_sobrescrever_o_alvo(tmp_path: Path) -> None:
+    # Achado A1 da auditoria de 2026-11-09: open("w") seguia o symlink e escrevia fora da pasta.
+    importante = tmp_path / "importante.txt"
+    _ = importante.write_text("não sobrescreva", encoding="utf-8")
+    pasta = tmp_path / "estado"
+    pasta.mkdir()
+    (pasta / "relatorio.md.tmp").symlink_to(importante)
+
+    with pytest.raises(OSError, match=r"symbolic link|Too many levels"):
+        escrever_atomico(pasta / "relatorio.md", "# relatório\n")
+
+    assert importante.read_text(encoding="utf-8") == "não sobrescreva"
+    assert not (pasta / "relatorio.md").exists()
+
+
+def _pasta_no_lugar(destino: Path) -> Path:
+    destino.mkdir()
+    dentro = destino / "dentro"
+    _ = dentro.write_text("x", encoding="utf-8")
+    return dentro
+
+
+def _sem_permissao(destino: Path) -> Path:
+    _ = destino.write_text("{}", encoding="utf-8")
+    destino.chmod(0o000)
+    return destino
+
+
+@pytest.mark.parametrize(
+    "preparar", [_pasta_no_lugar, _sem_permissao], ids=["pasta-no-lugar", "sem-permissao"]
+)
+def test_estado_ilegivel_devolve_vazio_sem_renomear_nem_apagar(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, preparar: Callable[[Path], Path]
+) -> None:
+    # Achado A2 da auditoria de 2026-11-09: OSError na leitura travava toda execução semanal.
+    preservado = preparar(tmp_path / "estado.json")
+
+    with caplog.at_level(logging.WARNING, logger="antilixo.relatorio.estado_em_disco"):
+        estado = ler_estado(tmp_path, hoje=date(2026, 11, 9))
+
+    assert estado == Estado()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["estado.json"]
+    assert preservado.exists()
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]

@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
 from pathlib import Path, PurePath
 
+import pytest
+
 from antilixo.dominio.modelo import (
     Achado,
     AvisoDeCategoria,
@@ -119,3 +121,25 @@ def test_gravar_relatorio_grava_o_ultimo_e_uma_copia_datada(tmp_path: Path) -> N
     assert copia.is_file()
     assert caminho.read_text(encoding="utf-8") == "# primeiro\n"
     assert copia.read_text(encoding="utf-8") == "# primeiro\n"
+
+
+@pytest.mark.parametrize(
+    "caractere",
+    [
+        chr(0x2028),
+        chr(0x2029),
+        chr(0x0085),
+        *map(chr, range(0x202A, 0x202F)),
+        *map(chr, range(0x2066, 0x206A)),
+    ],
+)
+def test_separadores_e_controles_bidi_do_nome_aparecem_escapados(caractere: str) -> None:
+    # Achado A3 da auditoria de 2026-11-09: quebram linha para quem divide por splitlines ou
+    # invertem o texto exibido, e não apareciam escapados.
+    achado = _achado(f"/Users/u/a{caractere}b", 2_500_000_000)
+    aviso = AvisoDeCategoria(Categoria.PROJETO_PARADO, 2_500_000_000, (achado,), notificar=False)
+
+    texto = montar_relatorio(_veredito((aviso,)), ResultadoDaLimpeza(), AGORA)
+
+    assert caractere not in texto
+    assert f"/Users/u/a\\u{ord(caractere):04x}b" in texto

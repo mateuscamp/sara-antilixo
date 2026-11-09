@@ -79,15 +79,19 @@ def _linha_do_achado(achado: Achado) -> str:
 
 
 _CONTROLE = re.compile(r"[\x00-\x1f\x7f]")
+# Quebram linha para quem divide o texto por `splitlines` (U+0085, U+2028, U+2029) ou invertem a
+# ordem exibida (controles bidi): um nome assim engana quem lê (achado A3 de 2026-11-09).
+_INVISIVEIS = re.compile(r"[\u0085\u2028\u2029\u202a-\u202e\u2066-\u2069]")
 
 
 def em_uma_linha(texto: str) -> str:
-    """Troca caracteres de controle pela forma escapada (`\\n`).
+    """Troca caracteres de controle e invisíveis perigosos pela forma escapada (`\\n`, `\\u2028`).
 
     Nome de pasta e motivo vêm do disco: uma quebra de linha neles criaria título ou item novo
     no relatório que o Claude lê.
     """
-    return _CONTROLE.sub(lambda m: repr(m.group())[1:-1], texto)
+    texto = _CONTROLE.sub(lambda m: repr(m.group())[1:-1], texto)
+    return _INVISIVEIS.sub(lambda m: f"\\u{ord(m.group()):04x}", texto)
 
 
 def codigo(caminho: PurePath) -> str:
