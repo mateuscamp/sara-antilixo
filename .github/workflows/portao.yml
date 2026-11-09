@@ -1,0 +1,42 @@
+# Copiado da skill python-on-rails em 2026-11-09.
+name: portão
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # Commit do main de mateuscamp/claude-skills. O juiz não mora no projeto: o CI o baixa aqui, numa
+  # versão fixa. Mudar esta linha é mudar o portão, e isso é decisão humana.
+  TRILHO_COMMIT: 1ab678db09ffd0d20df7fc58f03c58bad9162d71
+  JUIZ: .claude/skills/python-on-rails
+
+jobs:
+  portao:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # Actions fixadas pelo SHA do commit da tag, não pela tag, que pode ser movida.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2  # v10.3.3
+        with:
+          version: "0.13.7"  # o uv audit ainda é recurso em prévia: fixe a versão (a mesma do uv.lock local)
+      - name: Baixa o juiz na versão fixada
+        run: |
+          base="https://raw.githubusercontent.com/mateuscamp/claude-skills/$TRILHO_COMMIT/python-on-rails"
+          mkdir -p "$HOME/$JUIZ/scripts" "$HOME/$JUIZ/assets"
+          curl -fsSL "$base/scripts/conferir_trilho.py" -o "$HOME/$JUIZ/scripts/conferir_trilho.py"
+          curl -fsSL "$base/assets/pyproject-trilho.toml" -o "$HOME/$JUIZ/assets/pyproject-trilho.toml"
+      - run: uv sync --locked
+      - run: make check
+      # Direto, além do make: o `make` troca o código de saída por 2, e o juiz roda mesmo que a
+      # chamada dele tenha saído do portão.
+      - name: Juiz
+        run: uv run --locked python -I "$HOME/$JUIZ/scripts/conferir_trilho.py"
+      # Com teste funcional no projeto, acrescente: - run: make e2e
