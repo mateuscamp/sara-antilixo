@@ -99,6 +99,17 @@ def test_falha_de_limpeza_notifica_com_o_nome_do_item() -> None:
     assert "falha ao limpar uv" in _texto_da_notificacao(executor)
 
 
+def test_nome_da_falha_neutraliza_controle_bidirecional() -> None:
+    executor = ExecutorFalso()
+    cache = Achado(Categoria.CACHE, PurePath("/cache/uv\u202eoculto"), 10, "cache")
+    resultado = ResultadoDaLimpeza(falhas=(FalhaDeLimpeza(cache, "PermissionError"),))
+
+    _ = notificar(_veredito(), resultado, executor)
+
+    texto = _desfazer_literal_applescript(_texto_da_notificacao(executor))
+    assert texto == r"falha ao limpar uv\u202eoculto"
+
+
 def test_varias_falhas_viram_uma_contagem() -> None:
     executor = ExecutorFalso()
     cache = Achado(Categoria.CACHE, PurePath("/Users/u/.cache/uv"), 10, "cache")

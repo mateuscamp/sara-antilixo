@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from antilixo.dominio.modelo import Categoria, ResultadoDaLimpeza, Veredito
-from antilixo.relatorio.markdown import formatar_tamanho
+from antilixo.relatorio.markdown import em_uma_linha, formatar_tamanho
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +70,8 @@ def notificar(
         crescimento = formatar_tamanho(veredito.crescimento_do_disco_bytes)
         partes.append(f"disco cresceu {crescimento} em 30 dias")
     if len(resultado.falhas) == 1:
-        partes.append(f"falha ao limpar {resultado.falhas[0].achado.caminho.name}")
+        nome = em_uma_linha(resultado.falhas[0].achado.caminho.name)
+        partes.append(f"falha ao limpar {nome}")
     elif resultado.falhas:
         partes.append(f"{len(resultado.falhas)} falhas de limpeza")
     if not partes:

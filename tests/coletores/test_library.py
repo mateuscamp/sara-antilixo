@@ -2,8 +2,9 @@
 
 import logging
 import plistlib
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 from pathlib import Path
+from typing import override
 
 import pytest
 
@@ -274,6 +275,31 @@ def test_pasta_da_library_sem_permissao_e_pulada_com_log(
     assert [r.getMessage() for r in caplog.records] == [
         f"sem permissão para listar, pasta pulada: {caches_trancado}"
     ]
+
+
+class _PastaQueFalhaAoListar(Path):
+    @override
+    def iterdir(self) -> Generator[Path]:
+        if self.name == "Caches":
+            mensagem = f"Recebido {self}; esperado diretório legível."
+            raise NotADirectoryError(mensagem)
+        yield from super().iterdir()
+
+
+def test_erro_de_listagem_pula_pasta_com_log_e_continua_coleta(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    home = tmp_path / "home"
+    caches = home / "Library" / "Caches"
+    caches.mkdir(parents=True)
+    orfa = _dados(home, "Logs", "com.exemplo.Sumiu")
+
+    achados = coletar_orfaos_library(_PastaQueFalhaAoListar(home), ())
+
+    assert [a.caminho for a in achados] == [orfa]
+    assert [r.name for r in caplog.records] == ["antilixo.coletores.library"]
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    assert str(caches) in caplog.text
 
 
 def test_pasta_oculta_e_ignorada(tmp_path: Path) -> None:

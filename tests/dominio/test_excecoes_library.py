@@ -2,7 +2,27 @@
 
 import pytest
 
-from antilixo.dominio.excecoes_library import e_excecao
+from antilixo.dominio.excecoes_library import EXCECOES_LIBRARY, e_excecao
+
+
+def test_excecoes_nao_repetem_nome_sem_diferenciar_maiusculas() -> None:
+    nomes = [excecao.nome.casefold() for excecao in EXCECOES_LIBRARY]
+
+    assert len(nomes) == len(set(nomes))
+
+
+def test_excecoes_so_referenciam_as_sete_pastas_coletadas_da_library() -> None:
+    permitidas = {
+        "Application Support",
+        "Caches",
+        "Containers",
+        "Saved Application State",
+        "HTTPStorages",
+        "WebKit",
+        "Logs",
+    }
+
+    assert all(excecao.pastas <= permitidas for excecao in EXCECOES_LIBRARY)
 
 
 def test_excecao_de_nome_solto_vale_so_na_pasta_dela() -> None:

@@ -12,21 +12,10 @@ from typing import cast
 from xml.parsers.expat import ExpatError
 
 from antilixo.coletores.disco import somar_tamanho
-from antilixo.dominio.excecoes_library import e_excecao
+from antilixo.dominio.excecoes_library import PASTAS_DA_LIBRARY, e_excecao
 from antilixo.dominio.modelo import Achado, Categoria
 
 _log = logging.getLogger(__name__)
-
-# Onde apps desinstalados deixam dados com o nome do bundle id (medido em 2026-11-08).
-_PASTAS_DA_LIBRARY = (
-    "Application Support",
-    "Caches",
-    "Containers",
-    "Saved Application State",
-    "HTTPStorages",
-    "WebKit",
-    "Logs",
-)
 
 
 def coletar_orfaos_library(home: Path, pastas_de_apps: tuple[Path, ...]) -> tuple[Achado, ...]:
@@ -44,7 +33,7 @@ def coletar_orfaos_library(home: Path, pastas_de_apps: tuple[Path, ...]) -> tupl
             somar_tamanho(pasta),
             f"{pasta.name} sem app instalado ({subpasta})",
         )
-        for subpasta in _PASTAS_DA_LIBRARY
+        for subpasta in PASTAS_DA_LIBRARY
         for pasta in _subpastas(home / "Library" / subpasta)
         if not _e_do_sistema(pasta.name, subpasta)
         and not _e_de_app_instalado(pasta.name, instalados)
@@ -105,6 +94,9 @@ def _subpastas(raiz: Path) -> list[Path]:
         # O TCC recusa ~/Library/Containers e afins ao LaunchAgent sem acesso total ao disco
         # (achado A3 de 2026-11-09). As outras pastas continuam sendo coletadas.
         _log.warning("sem permissão para listar, pasta pulada: %s", raiz)
+        return []
+    except OSError as erro:
+        _log.warning("erro ao listar, pasta pulada: %s (%s)", raiz, erro)
         return []
 
 

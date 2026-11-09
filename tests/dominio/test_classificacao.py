@@ -189,6 +189,18 @@ def test_segunda_execucao_no_mesmo_dia_substitui_a_medicao_do_dia() -> None:
     assert veredito.novo_estado.medicoes == (MedicaoDeDisco(HOJE, 101 * GB),)
 
 
+def test_medicoes_repetidas_de_dias_passados_ficam_com_a_ultima_da_entrada() -> None:
+    primeira = MedicaoDeDisco(date(2026, 10, 10), 90 * GB)
+    ultima = MedicaoDeDisco(primeira.dia, 105 * GB)
+    outro_dia = MedicaoDeDisco(date(2026, 11, 2), 110 * GB)
+    estado = Estado(medicoes=(outro_dia, primeira, outro_dia, ultima))
+
+    veredito = _classificar(estado=estado, disco=120 * GB)
+
+    assert veredito.novo_estado.medicoes == (ultima, outro_dia, MedicaoDeDisco(HOJE, 120 * GB))
+    assert veredito.crescimento_do_disco_bytes is None
+
+
 def test_crescimento_de_mais_de_20_gb_em_30_dias_e_informado() -> None:
     inicio = MedicaoDeDisco(date(2026, 10, 10), 100 * GB)  # 30 dias: dentro
     meio = MedicaoDeDisco(date(2026, 10, 20), 110 * GB)

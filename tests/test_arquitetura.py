@@ -9,7 +9,19 @@ PACOTE = Path(__file__).resolve().parents[1] / "src" / "antilixo"
 
 # Nomes de chamada que apagam: shutil.rmtree, Path.unlink/rmdir, os.remove/unlink/rmdir/removedirs.
 # O import-linter só barra `shutil` fora de acoes/; Path e os passam por ele.
-_APAGAM = frozenset({"rmtree", "unlink", "rmdir", "remove", "removedirs"})
+# TemporaryDirectory e NamedTemporaryFile apagam por dentro (rmtree/unlink no fim do contexto):
+# entraram depois que um gravar_estado com TemporaryDirectory passou pelos dois (2026-11-09).
+_APAGAM = frozenset(
+    {
+        "rmtree",
+        "unlink",
+        "rmdir",
+        "remove",
+        "removedirs",
+        "TemporaryDirectory",
+        "NamedTemporaryFile",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +62,7 @@ def test_so_acoes_apaga_arquivos() -> None:
 
 _PLANTADO = """import os
 import shutil
+import tempfile
 from os import remove
 from pathlib import Path
 
@@ -62,6 +75,8 @@ def varrer(p: Path) -> None:
     os.removedirs(p)
     remove(p)
     p.exists()
+    tempfile.TemporaryDirectory(dir=p)
+    tempfile.NamedTemporaryFile(dir=p)
 """
 
 
@@ -75,10 +90,12 @@ def test_detector_acha_cada_forma_de_apagar_fora_de_acoes(tmp_path: Path) -> Non
 
     plantado = tmp_path / "coletores" / "plantado.py"
     assert [(c.arquivo, c.linha, c.nome) for c in achadas] == [
-        (plantado, 8, "rmtree"),
-        (plantado, 9, "unlink"),
-        (plantado, 10, "rmdir"),
-        (plantado, 11, "remove"),
-        (plantado, 12, "removedirs"),
-        (plantado, 13, "remove"),
+        (plantado, 9, "rmtree"),
+        (plantado, 10, "unlink"),
+        (plantado, 11, "rmdir"),
+        (plantado, 12, "remove"),
+        (plantado, 13, "removedirs"),
+        (plantado, 14, "remove"),
+        (plantado, 16, "TemporaryDirectory"),
+        (plantado, 17, "NamedTemporaryFile"),
     ]

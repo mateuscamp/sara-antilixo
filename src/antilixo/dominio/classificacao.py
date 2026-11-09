@@ -96,9 +96,9 @@ def _medicoes(
     # A medição nova substitui a do mesmo dia (duas execuções num dia, decidido em 2026-11-09).
     # Data futura (relógio errado numa execução anterior) é descartada (decidido em 2026-11-09).
     # Ordenadas por dia, para quem ler o estado (achado R4 da revisão de 2026-11-09).
-    recentes = sorted(
-        (m for m in medicoes if hoje - JANELA_DE_MEDICOES <= m.dia < hoje), key=lambda m: m.dia
-    )
+    # A última entrada de cada dia prevalece também para medições passadas duplicadas.
+    por_dia = {m.dia: m for m in medicoes if hoje - JANELA_DE_MEDICOES <= m.dia < hoje}
+    recentes = sorted(por_dia.values(), key=lambda m: m.dia)
     return (*recentes, MedicaoDeDisco(hoje, uso_do_disco_bytes))
 
 

@@ -78,6 +78,24 @@ def test_gravacao_e_leitura_preservam_estado_exato(tmp_path: Path, estado: Estad
     assert ler_estado(tmp_path, hoje=date(2026, 11, 9)) == estado
 
 
+def test_gravacao_com_pasta_no_destino_preserva_conteudo_e_segue(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    destino = tmp_path / "estado.json"
+    destino.mkdir()
+    preservado = destino / "importante.txt"
+    _ = preservado.write_text("preservar", encoding="utf-8")
+
+    gravar_estado(tmp_path, Estado())
+
+    assert preservado.read_text(encoding="utf-8") == "preservar"
+    # O temporário fica: relatorio/ não apaga (ADR-0001); a próxima gravação o reaproveita.
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["estado.json", "estado.json.tmp"]
+    assert [r.name for r in caplog.records] == ["antilixo.relatorio.estado_em_disco"]
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    assert str(destino) in caplog.text
+
+
 def _documento(
     *,
     versao: object = 1,

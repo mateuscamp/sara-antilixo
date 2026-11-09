@@ -8,6 +8,17 @@ Comparação sem diferenciar maiúsculas.
 
 from dataclasses import dataclass
 
+# Onde apps desinstalados deixam dados com o nome do bundle id (medido em 2026-11-08).
+PASTAS_DA_LIBRARY = (
+    "Application Support",
+    "Caches",
+    "Containers",
+    "Saved Application State",
+    "HTTPStorages",
+    "WebKit",
+    "Logs",
+)
+
 _TODAS: frozenset[str] = frozenset()
 _SUPORTE = frozenset({"Application Support"})
 _CACHES = frozenset({"Caches"})

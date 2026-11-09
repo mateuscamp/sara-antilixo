@@ -163,6 +163,10 @@ def gravar_estado(pasta_de_estado: Path, estado: Estado) -> None:
             for medicao in estado.medicoes
         ],
     }
-    escrever_atomico(
-        pasta_de_estado / "estado.json", json.dumps(dados, indent=2, ensure_ascii=False) + "\n"
-    )
+    destino = pasta_de_estado / "estado.json"
+    try:
+        escrever_atomico(destino, json.dumps(dados, indent=2, ensure_ascii=False) + "\n")
+    except OSError as erro:
+        # Não derruba a execução semanal (achado B1 de 2026-11-09). O `estado.json.tmp` que
+        # sobrar fica: relatorio/ não apaga (ADR-0001), e a próxima gravação o reaproveita.
+        logger.warning("Estado não gravado em %s: %s", destino, erro)
