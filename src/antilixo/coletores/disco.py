@@ -1,18 +1,35 @@
 """Medidas de disco compartilhadas pelos coletores. Só lê; nunca apaga (ADR-0001)."""
 
+import logging
 import os
 import stat
 from pathlib import Path
 
+_log = logging.getLogger(__name__)
+
 
 def somar_tamanho(raiz: Path) -> int:
-    """Soma o tamanho dos arquivos comuns sob `raiz`, sem seguir symlinks."""
+    """Soma o espaço ocupado por arquivos comuns sob `raiz`, sem seguir symlinks.
+
+    Achado A4 de 2026-11-09: arquivos esparsos como Docker.raw e hardlinks inflavam
+    o tamanho; por isso soma blocos alocados e conta cada inode uma vez por chamada.
+    """
     total = 0
+    vistos: set[tuple[int, int]] = set()
     for pasta, _subpastas, arquivos in raiz.walk():
         for nome in arquivos:
-            info = (pasta / nome).lstat()
+            try:
+                info = (pasta / nome).lstat()
+            except OSError:
+                # O dono do cache pode apagar o arquivo entre a listagem e o lstat (achado A2
+                # de 2026-11-09); sem permissão de busca dá o mesmo. Fica fora da soma.
+                _log.debug("lstat falhou, arquivo fora da soma: %s", pasta / nome)
+                continue
             if stat.S_ISREG(info.st_mode):
-                total += info.st_size
+                inode = (info.st_dev, info.st_ino)
+                if inode not in vistos:
+                    vistos.add(inode)
+                    total += info.st_blocks * 512
     return total
 
 

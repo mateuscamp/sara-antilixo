@@ -9,13 +9,13 @@ from antilixo.dominio.modelo import Achado, Categoria
 def test_cache_presente_vira_achado_com_tamanho_somado(tmp_path: Path) -> None:
     cache = tmp_path / ".cache" / "uv"
     (cache / "sub").mkdir(parents=True)
-    _ = (cache / "a.bin").write_bytes(b"x" * 100)
-    _ = (cache / "sub" / "b.bin").write_bytes(b"y" * 23)
+    _ = (cache / "a.bin").write_bytes(b"x" * 4096 * 3)
+    _ = (cache / "sub" / "b.bin").write_bytes(b"y" * 4096 * 2)
 
     achados = coletar_caches(tmp_path)
 
     assert achados == (
-        Achado(Categoria.CACHE, cache, 123, "cache recriável da allowlist: ~/.cache/uv"),
+        Achado(Categoria.CACHE, cache, 4096 * 5, "cache recriável da allowlist: ~/.cache/uv"),
     )
 
 
@@ -32,13 +32,13 @@ def test_symlink_dentro_do_cache_nao_conta_o_que_esta_fora(tmp_path: Path) -> No
     _ = (fora / "grande.bin").write_bytes(b"z" * 1000)
     cache = tmp_path / ".npm" / "_cacache"
     cache.mkdir(parents=True)
-    _ = (cache / "blob").write_bytes(b"x" * 7)
+    _ = (cache / "blob").write_bytes(b"x" * 4096)
     (cache / "atalho-pasta").symlink_to(fora)
     (cache / "atalho-arquivo").symlink_to(fora / "grande.bin")
 
-    (achado,) = coletar_caches(tmp_path)
+    achados = coletar_caches(tmp_path)
 
-    assert achado.tamanho_bytes == 7
+    assert [a.tamanho_bytes for a in achados] == [4096]
 
 
 def test_cache_que_e_symlink_para_fora_nao_vira_achado(tmp_path: Path) -> None:

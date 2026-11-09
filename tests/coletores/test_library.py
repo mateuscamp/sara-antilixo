@@ -1,12 +1,14 @@
 """Coletor de dados de apps desinstalados na ~/Library (órfãos, AGENTS.md)."""
 
+import logging
 import plistlib
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from antilixo.coletores.library import coletar_orfaos_library
-from antilixo.dominio.excecoes_library import EXCECOES_LIBRARY
+from antilixo.dominio.excecoes_library import EXCECOES_LIBRARY, Excecao
 from antilixo.dominio.modelo import Achado, Categoria
 
 
@@ -29,7 +31,7 @@ def test_pasta_de_app_desinstalado_vira_orfao(tmp_path: Path) -> None:
     home = tmp_path / "home"
     apps = tmp_path / "Applications"
     apps.mkdir()
-    orfa = _dados(home, "Application Support", "com.unity3d.UnityEditor", 70)
+    orfa = _dados(home, "Application Support", "com.unity3d.UnityEditor", 4096 * 2)
 
     achados = coletar_orfaos_library(home, (apps,))
 
@@ -37,7 +39,7 @@ def test_pasta_de_app_desinstalado_vira_orfao(tmp_path: Path) -> None:
         Achado(
             Categoria.ORFAO_LIBRARY,
             orfa,
-            70,
+            4096 * 2,
             "com.unity3d.UnityEditor sem app instalado (Application Support)",
         ),
     )
@@ -56,12 +58,13 @@ def test_pasta_de_app_instalado_nao_e_orfa(tmp_path: Path) -> None:
     "conteudo",
     [
         b"isto nao e plist",
+        b'<?xml version="1.0"?><plist><dict><key>CFBundleIdentifier',
         plistlib.dumps({"CFBundleName": "Sem id"}),
         plistlib.dumps({"CFBundleIdentifier": 42}),
         plistlib.dumps(["lista", "e nao dicionario"]),
         None,
     ],
-    ids=["lixo", "sem-id", "id-nao-texto", "nao-dicionario", "sem-info-plist"],
+    ids=["lixo", "xml-truncado", "sem-id", "id-nao-texto", "nao-dicionario", "sem-info-plist"],
 )
 def test_plist_ilegivel_e_ignorado_sem_derrubar_a_coleta(
     tmp_path: Path, conteudo: bytes | None
@@ -133,13 +136,16 @@ def test_pasta_com_nome_sem_app_correspondente_e_orfa(tmp_path: Path, nome: str)
     home = tmp_path / "home"
     apps = tmp_path / "Applications"
     _ = _instalar_app(apps, "Outro", "com.exemplo.Outro")
-    orfa = _dados(home, "Application Support", nome, 12)
+    orfa = _dados(home, "Application Support", nome, 4096 * 3)
 
     achados = coletar_orfaos_library(home, (apps,))
 
     assert achados == (
         Achado(
-            Categoria.ORFAO_LIBRARY, orfa, 12, f"{nome} sem app instalado (Application Support)"
+            Categoria.ORFAO_LIBRARY,
+            orfa,
+            4096 * 3,
+            f"{nome} sem app instalado (Application Support)",
         ),
     )
 
@@ -180,12 +186,22 @@ def test_pasta_da_apple_nunca_e_orfa(tmp_path: Path) -> None:
     assert coletar_orfaos_library(home, ()) == ()
 
 
-@pytest.mark.parametrize("nome", sorted(EXCECOES_LIBRARY))
-def test_pasta_da_lista_de_excecoes_nunca_e_orfa(tmp_path: Path, nome: str) -> None:
+@pytest.mark.parametrize("excecao", EXCECOES_LIBRARY, ids=[e.nome for e in EXCECOES_LIBRARY])
+def test_pasta_da_lista_de_excecoes_nunca_e_orfa(tmp_path: Path, excecao: Excecao) -> None:
     home = tmp_path / "home"
-    _ = _dados(home, "Caches", nome)
+    for subpasta in excecao.pastas or {"Caches"}:
+        _ = _dados(home, subpasta, excecao.nome)
 
     assert coletar_orfaos_library(home, ()) == ()
+
+
+def test_excecao_de_nome_solto_nao_vale_fora_da_pasta_dela(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    homonima = _dados(home, "Application Support", "Databases")
+
+    achados = coletar_orfaos_library(home, ())
+
+    assert [a.caminho for a in achados] == [homonima]
 
 
 def test_pasta_com_prefixo_de_app_instalado_nao_e_orfa(tmp_path: Path) -> None:
@@ -233,3 +249,73 @@ def test_app_em_subpasta_ou_aninhado_conta_como_instalado(tmp_path: Path, relati
     _ = _dados(home, "Containers", "com.exemplo.aninhado")
 
     assert coletar_orfaos_library(home, (apps,)) == ()
+
+
+@pytest.fixture
+def caches_trancado(tmp_path: Path) -> Iterator[Path]:
+    """~/Library/Caches que recusa a listagem, como o TCC faz sob o launchd."""
+    caches = tmp_path / "home" / "Library" / "Caches"
+    caches.mkdir(parents=True)
+    caches.chmod(0o000)
+    yield caches
+    caches.chmod(0o700)
+
+
+def test_pasta_da_library_sem_permissao_e_pulada_com_log(
+    tmp_path: Path, caches_trancado: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    home = tmp_path / "home"
+    orfa = _dados(home, "Logs", "com.exemplo.Sumiu")
+
+    with caplog.at_level(logging.WARNING, logger="antilixo.coletores.library"):
+        achados = coletar_orfaos_library(home, ())
+
+    assert [a.caminho for a in achados] == [orfa]
+    assert [r.getMessage() for r in caplog.records] == [
+        f"sem permissão para listar, pasta pulada: {caches_trancado}"
+    ]
+
+
+def test_pasta_oculta_e_ignorada(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _ = _dados(home, "Caches", ".Oculta")
+    _ = _dados(home, "Application Support", ".com.exemplo.Oculto")
+
+    assert coletar_orfaos_library(home, ()) == ()
+
+
+@pytest.mark.parametrize(
+    ("bundle_id", "pasta"),
+    [
+        ("com.google.Chrome", "Google"),
+        ("com.jetbrains.toolbox", "JetBrains"),
+        ("com.Blizzard.Battle-net", "BLIZZARD"),
+    ],
+)
+def test_pasta_com_nome_do_fornecedor_de_app_instalado_nao_e_orfa(
+    tmp_path: Path, bundle_id: str, pasta: str
+) -> None:
+    # Regra do fornecedor (2026-11-09): o 2º rótulo do bundle id conta como nome do app.
+    home = tmp_path / "home"
+    apps = tmp_path / "Applications"
+    _ = _instalar_app(apps, "App", bundle_id)
+    _ = _dados(home, "Application Support", pasta)
+    outra = _dados(home, "Application Support", "Microsoft")
+
+    achados = coletar_orfaos_library(home, (apps,))
+
+    assert [a.caminho for a in achados] == [outra]
+
+
+def test_busca_de_apps_desce_no_maximo_duas_pastas_comuns(tmp_path: Path) -> None:
+    # Regra (b2) de 2026-11-09: profundidade limitada para a varredura continuar rápida.
+    home = tmp_path / "home"
+    apps = tmp_path / "Applications"
+    _instalar_bundle(apps / "Fornecedor" / "Suite" / "Raso.app", "com.exemplo.raso")
+    _instalar_bundle(apps / "a" / "b" / "c" / "Fundo.app", "com.exemplo.fundo")
+    _ = _dados(home, "Caches", "com.exemplo.raso")
+    fundo = _dados(home, "Caches", "com.exemplo.fundo")
+
+    achados = coletar_orfaos_library(home, (apps,))
+
+    assert [a.caminho for a in achados] == [fundo]

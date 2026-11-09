@@ -14,7 +14,7 @@ def _biblioteca(caminho: Path, tamanho: int) -> Path:
 
 def test_biblioteca_no_icloud_drive_vira_achado(tmp_path: Path) -> None:
     icloud = tmp_path / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
-    biblioteca = _biblioteca(icloud / "Fotos" / "Antiga.photoslibrary", 300)
+    biblioteca = _biblioteca(icloud / "Fotos" / "Antiga.photoslibrary", 4096 * 3)
 
     achados = coletar_fotos_em_nuvem(tmp_path)
 
@@ -22,7 +22,7 @@ def test_biblioteca_no_icloud_drive_vira_achado(tmp_path: Path) -> None:
         Achado(
             Categoria.FOTOS_EM_NUVEM,
             biblioteca,
-            300,
+            4096 * 3,
             "biblioteca do Fotos dentro de pasta sincronizada: Mobile Documents",
         ),
     )
@@ -41,12 +41,12 @@ def test_biblioteca_no_cloudstorage_vira_achado(tmp_path: Path) -> None:
 
 def test_nao_procura_biblioteca_dentro_de_outra(tmp_path: Path) -> None:
     icloud = tmp_path / "Library" / "Mobile Documents" / "com~apple~CloudDocs"
-    externa = _biblioteca(icloud / "Externa.photoslibrary", 10)
-    _ = _biblioteca(externa / "resources" / "Interna.photoslibrary", 5)
+    externa = _biblioteca(icloud / "Externa.photoslibrary", 4096 * 2)
+    _ = _biblioteca(externa / "resources" / "Interna.photoslibrary", 4096)
 
     achados = coletar_fotos_em_nuvem(tmp_path)
 
-    assert [(a.caminho, a.tamanho_bytes) for a in achados] == [(externa, 15)]
+    assert [(a.caminho, a.tamanho_bytes) for a in achados] == [(externa, 4096 * 3)]
 
 
 def test_biblioteca_fora_das_pastas_sincronizadas_nao_vira_achado(tmp_path: Path) -> None:
