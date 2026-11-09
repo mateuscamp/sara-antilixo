@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Modelo do LaunchAgent. O install.sh troca os marcadores entre arrobas, já escapados para XML. -->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.mateuscamp.sara-antilixo</string>
+	<key>ProgramArguments</key>
+	<array>
+		<!-- Caminho absoluto: o launchd roda o agente com PATH mínimo, sem /opt/homebrew/bin. -->
+		<string>@UV@</string>
+		<string>run</string>
+		<string>--locked</string>
+		<string>--project</string>
+		<string>@REPO@</string>
+		<string>python</string>
+		<string>-m</string>
+		<string>antilixo</string>
+	</array>
+	<!-- Domingo às 10h (decisão do usuário). Com o Mac dormindo, o launchd roda ao acordar. -->
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Weekday</key>
+		<integer>0</integer>
+		<key>Hour</key>
+		<integer>10</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>@LOG@</string>
+	<key>StandardErrorPath</key>
+	<string>@LOG@</string>
+</dict>
+</plist>
