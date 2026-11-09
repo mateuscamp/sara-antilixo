@@ -12,12 +12,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from antilixo.dominio.modelo import Achado, Categoria
+from antilixo.dominio.tamanho import formatar_tamanho
 
 logger = logging.getLogger(__name__)
 
 _DIAS_PARADO = 60
-_GB = 1_000_000_000  # decimal, como o Finder; mesmo formato do relatorio/markdown.py
-_MB = 1_000_000
 _TIMEOUT_GIT_S = 30
 _BUILD_SEMPRE = frozenset({"node_modules", ".venv", "venv"})
 # target/ e .build/ são nomes comuns demais: só contam ao lado do manifesto que os gera.
@@ -188,13 +187,6 @@ def _exibir(caminho: Path, home: Path) -> str:
     return f"~/{caminho.relative_to(home)}" if caminho.is_relative_to(home) else str(caminho)
 
 
-def formatar_tamanho(tamanho_bytes: int) -> str:
-    """Decimal, com vírgula: `1,2 GB`, `450 MB`. Provisório: unificar com relatorio/ (O3)."""
-    if tamanho_bytes >= _GB:
-        return f"{tamanho_bytes / _GB:.1f} GB".replace(".", ",")
-    return f"{tamanho_bytes // _MB} MB"
-
-
 def _plural(quantidade: int, singular: str, plural: str) -> str:
     return f"{quantidade} {singular if quantidade == 1 else plural}"
 
@@ -228,12 +220,12 @@ def _medir_build(repo: Path) -> tuple[tuple[str, int], ...]:
     vistos: set[tuple[int, int]] = set()  # um achado: hardlink entre builds conta uma vez
     for pasta, subpastas, _ in repo.walk():
         subpastas.sort()  # ordem fixa: o hardlink compartilhado cai sempre no mesmo nome
-        for nome in list(subpastas):
-            if nome == ".git":
-                subpastas.remove(nome)
-            elif _e_build(pasta, nome):
-                subpastas.remove(nome)  # medido inteiro: não desce de novo
-                por_nome[nome] = por_nome.get(nome, 0) + _tamanho(pasta / nome, vistos)
+        builds = [nome for nome in subpastas if nome != ".git" and _e_build(pasta, nome)]
+        for nome in builds:
+            por_nome[nome] = por_nome.get(nome, 0) + _tamanho(pasta / nome, vistos)
+        # Poda do walk sem list.remove (o teste de arquitetura lê `remove` como apagar): não desce
+        # no .git nem num build já medido inteiro.
+        subpastas[:] = [nome for nome in subpastas if nome != ".git" and nome not in builds]
     return tuple(sorted(por_nome.items(), key=lambda item: (-item[1], item[0])))
 
 

@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from antilixo.coletores.projetos import coletar_projetos, formatar_tamanho
+from antilixo.coletores.projetos import coletar_projetos
 from antilixo.dominio.modelo import Achado, Categoria
+from antilixo.dominio.tamanho import formatar_tamanho
 
 HOJE = date(2026, 11, 9)
 IDADE_DO_MODELO = 100

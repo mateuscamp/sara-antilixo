@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from antilixo.dominio.modelo import Categoria, ResultadoDaLimpeza, Veredito
-from antilixo.relatorio.markdown import em_uma_linha, formatar_tamanho
+from antilixo.dominio.tamanho import formatar_tamanho
+from antilixo.relatorio.markdown import em_uma_linha
 
 logger = logging.getLogger(__name__)
 

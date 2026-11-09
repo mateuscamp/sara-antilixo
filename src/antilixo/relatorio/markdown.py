@@ -11,10 +11,8 @@ from antilixo.dominio.modelo import (
     ResultadoDaLimpeza,
     Veredito,
 )
+from antilixo.dominio.tamanho import formatar_tamanho
 from antilixo.relatorio.estado_em_disco import escrever_atomico
-
-GB = 1_000_000_000  # decimal, como o Finder mostra
-MB = 1_000_000
 
 ROTULOS: dict[Categoria, str] = {
     Categoria.ORFAO_LIBRARY: "Órfãos na Library",
@@ -23,13 +21,6 @@ ROTULOS: dict[Categoria, str] = {
     Categoria.FOTOS_EM_NUVEM: "Bibliotecas do Fotos na nuvem",
     Categoria.CACHE: "Caches recriáveis",
 }
-
-
-def formatar_tamanho(tamanho_bytes: int) -> str:
-    """Tamanho legível em unidades decimais, com vírgula: `3,2 GB`, `450 MB`."""
-    if tamanho_bytes >= GB:
-        return f"{tamanho_bytes / GB:.1f} GB".replace(".", ",")
-    return f"{tamanho_bytes // MB} MB"
 
 
 def montar_relatorio(veredito: Veredito, resultado: ResultadoDaLimpeza, agora: datetime) -> str:
