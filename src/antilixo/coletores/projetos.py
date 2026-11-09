@@ -33,13 +33,25 @@ class RepoIlegivelError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class _Git:
     executavel: str
+    # Pares `-c chave=valor` que anulam o que a config do repo executaria (ver _abrir).
+    neutros: tuple[str, ...] = ()
 
-    def ler(self, repo: Path, *args: str) -> str:
-        """Roda um comando git só de leitura no repo e devolve o stdout."""
+    def ler(self, repo: Path, *args: str, vazio_sai_com_1: bool = False) -> str:
+        """Roda um comando git só de leitura no repo e devolve o stdout.
+
+        `vazio_sai_com_1`: sai com 1 quando não acha nada (ex.: `git config --get-regexp`).
+        """
         comando = [
             self.executavel,
+            # Sem tty não há pager; explícito para `core.pager` do repo nunca entrar em jogo.
+            "--no-pager",
             # Sem isso, `git status` regrava o índice: o coletor só lê.
             "--no-optional-locks",
+            # Repo hostil no HOME (achado S1, 2026-11-09): o fsmonitor da config local roda comando
+            # a cada `git status`. `-c` na linha de comando vence a config do repo.
+            "-c",
+            "core.fsmonitor=false",
+            *self.neutros,
             # Explícitos: com `-C` sozinho, um .git corrompido faria o git subir até um repo pai
             # (ex.: HOME versionado com dotfiles) e ler o repo errado.
             f"--git-dir={repo / '.git'}",
@@ -55,11 +67,39 @@ class _Git:
         except (OSError, subprocess.TimeoutExpired) as erro:
             msg = f"{' '.join(comando)} não rodou ({erro}); esperado git em {self.executavel!r}"
             raise RepoIlegivelError(msg) from erro
+        if saida.returncode == 1 and vazio_sai_com_1 and not saida.stdout:
+            return ""
         if saida.returncode != 0:
             erro = saida.stderr.strip()
             msg = f"{' '.join(comando)} saiu com {saida.returncode}, esperado 0: {erro}"
             raise RepoIlegivelError(msg)
         return saida.stdout
+
+
+def _abrir(executavel: str, repo: Path) -> _Git:
+    """Git para ler `repo` com todo filtro da config anulado.
+
+    Filtro (`filter.<nome>.clean`/`process`) é comando que o `git status` roda ao reler um arquivo,
+    ativado por `.gitattributes` ou `.git/info/attributes` (achado S1, opção (b) decidida pelo
+    humano em 2026-11-09). Nenhuma bandeira do git desliga todos; por isso cada nome configurado é
+    anulado. Ler os nomes com `git config` não executa nada.
+    """
+    chaves = _Git(executavel).ler(
+        repo, "config", "-z", "--name-only", "--get-regexp", r"^filter\.", vazio_sai_com_1=True
+    )
+    # `filter.a.b.clean` é o filtro "a.b": o nome é tudo entre o primeiro e o último ponto.
+    nomes = sorted({c.removeprefix("filter.").rpartition(".")[0] for c in chaves.split("\0") if c})
+    # `-c` corta chave e valor no primeiro "=": um filtro "a=b" não tem como ser anulado e
+    # executaria (achado da code-audit de 2026-11-09). Fecha por falha: o repo é pulado.
+    inanulaveis = [nome for nome in nomes if "=" in nome]
+    if inanulaveis:
+        msg = f"filtro {inanulaveis} em {repo}: nome com '=' não é anulável; esperado nome sem '='"
+        raise RepoIlegivelError(msg)
+    neutros: list[str] = []
+    for nome in nomes:
+        for chave in ("clean=", "smudge=", "process=", "required=false"):
+            neutros.extend(("-c", f"filter.{nome}.{chave}"))
+    return _Git(executavel, tuple(neutros))
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,11 +132,10 @@ def coletar_projetos(home: Path, dev: Path, hoje: date, *, git: str = "git") -> 
 
     `git` existe para o teste simular git ausente. Repo ilegível é pulado e fica no log.
     """
-    executor = _Git(git)
     achados: list[Achado] = []
     for repo in _achar_repos(home):
         try:
-            achados.extend(_achados_do_repo(repo, home, dev, hoje, executor))
+            achados.extend(_achados_do_repo(repo, home, dev, hoje, _abrir(git, repo)))
         except (RepoIlegivelError, OSError) as erro:
             logger.warning("repo pulado: %s: %s", repo, erro)
     return tuple(achados)
@@ -111,7 +150,7 @@ def _achados_do_repo(repo: Path, home: Path, dev: Path, hoje: date, git: _Git) -
         achados.append(Achado(Categoria.PROJETO_PARADO, repo, situacao.build_bytes, motivo))
     if not repo.is_relative_to(dev):
         motivo = f"repositório git fora de {_exibir(dev, home)}"
-        achados.append(Achado(Categoria.GIT_FORA_DE_DEV, repo, _tamanho(repo), motivo))
+        achados.append(Achado(Categoria.GIT_FORA_DE_DEV, repo, _tamanho(repo, set()), motivo))
     return achados
 
 
@@ -129,7 +168,7 @@ def _ler_situacao(repo: Path, hoje: date, git: _Git) -> _Situacao:
 
 def _motivo(situacao: _Situacao) -> str:
     partes = [f"parado há {situacao.dias_parado} dias"]
-    partes.extend(f"{_formatar_tamanho(tamanho)} em {nome}" for nome, tamanho in situacao.builds)
+    partes.extend(f"{formatar_tamanho(tamanho)} em {nome}" for nome, tamanho in situacao.builds)
     if situacao.commits_sem_push:
         partes.append(_plural(situacao.commits_sem_push, "commit sem push", "commits sem push"))
     if situacao.stashes:
@@ -149,7 +188,8 @@ def _exibir(caminho: Path, home: Path) -> str:
     return f"~/{caminho.relative_to(home)}" if caminho.is_relative_to(home) else str(caminho)
 
 
-def _formatar_tamanho(tamanho_bytes: int) -> str:
+def formatar_tamanho(tamanho_bytes: int) -> str:
+    """Decimal, com vírgula: `1,2 GB`, `450 MB`. Provisório: unificar com relatorio/ (O3)."""
     if tamanho_bytes >= _GB:
         return f"{tamanho_bytes / _GB:.1f} GB".replace(".", ",")
     return f"{tamanho_bytes // _MB} MB"
@@ -185,13 +225,15 @@ def _achar_repos(home: Path) -> Iterator[Path]:
 def _medir_build(repo: Path) -> tuple[tuple[str, int], ...]:
     """Bytes das pastas de build recriáveis em qualquer nível do repo, somados por nome."""
     por_nome: dict[str, int] = {}
+    vistos: set[tuple[int, int]] = set()  # um achado: hardlink entre builds conta uma vez
     for pasta, subpastas, _ in repo.walk():
+        subpastas.sort()  # ordem fixa: o hardlink compartilhado cai sempre no mesmo nome
         for nome in list(subpastas):
             if nome == ".git":
                 subpastas.remove(nome)
             elif _e_build(pasta, nome):
                 subpastas.remove(nome)  # medido inteiro: não desce de novo
-                por_nome[nome] = por_nome.get(nome, 0) + _tamanho(pasta / nome)
+                por_nome[nome] = por_nome.get(nome, 0) + _tamanho(pasta / nome, vistos)
     return tuple(sorted(por_nome.items(), key=lambda item: (-item[1], item[0])))
 
 
@@ -202,11 +244,20 @@ def _e_build(pasta: Path, nome: str) -> bool:
     return manifesto is not None and (pasta / manifesto).is_file()
 
 
-def _tamanho(raiz: Path) -> int:
-    """Bytes aparentes (st_size) dos arquivos sob `raiz`, sem seguir symlinks."""
+def _tamanho(raiz: Path, vistos: set[tuple[int, int]]) -> int:
+    """Espaço ocupado no disco pelos arquivos sob `raiz`, sem seguir symlinks.
+
+    st_blocks * 512, não st_size (decisão de 2026-11-09): arquivo esparso conta o que aloca.
+    Hardlink conta uma vez por inode; `vistos` é compartilhado por todo o achado.
+    """
     total = 0
     for pasta, _, arquivos in raiz.walk():
-        total += sum((pasta / nome).lstat().st_size for nome in arquivos)
+        for nome in arquivos:
+            info = (pasta / nome).lstat()
+            inode = (info.st_dev, info.st_ino)
+            if inode not in vistos:
+                vistos.add(inode)
+                total += info.st_blocks * 512
     return total
 
 
@@ -238,7 +289,15 @@ def _status(repo: Path, git: _Git) -> tuple[int, int]:
     Uma chamada só: o cabeçalho `# stash N` do porcelain v2 poupa um `git stash list` por repo.
     """
     saida = git.ler(
-        repo, "status", "--porcelain=v2", "--show-stash", "--no-renames", "--untracked-files=normal"
+        repo,
+        "status",
+        "--porcelain=v2",
+        "--show-stash",
+        "--no-renames",
+        "--untracked-files=normal",
+        # Sem descer no submódulo: a config dele tem filtros que _abrir não anula (achado S1).
+        # Perde-se a sujeira dentro do submódulo; o commit dele trocado continua aparecendo.
+        "--ignore-submodules=dirty",
     )
     stashes = 0
     arquivos = 0
