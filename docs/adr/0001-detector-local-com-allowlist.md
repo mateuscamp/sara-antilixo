@@ -78,12 +78,12 @@ alguma deleção acontecer fora da allowlist.
 | O que verifica | Mecanismo | Onde roda | Falha quando |
 |---|---|---|---|
 | Limpeza só dentro da allowlist | `test_limpar_recusa_fora_da_allowlist` | `make check` | `limpar()` aceita caminho fora da allowlist, inclusive por `..`, symlink ou prefixo parecido |
-| Repo com trabalho não salvo nunca é alvo | `test_repo_com_commit_sem_push_nunca_e_alvo` (pendente) | `make check` | Repo com commit sem push, stash ou arquivo modificado aparece como alvo |
-| Só `acoes/` apaga | import-linter "só acoes apaga arquivos" (ativo) + `test_so_acoes_apaga_arquivos` (pendente, cobre `unlink`/`rmdir`) | `make check` | `shutil`, `rmtree`, `unlink` ou `rmdir` fora de `acoes/` |
-| Instalação reproduzível | `test_install_idempotente` com HOME temporário (pendente) | `make check` | Rodar `install.sh` duas vezes muda algo na segunda |
-| O detector está rodando | Heartbeat no `.zshrc` (pendente) | Cada shell aberto | Último relatório com >8 dias |
-| Orçamento de disco | Aviso no relatório (pendente) | Execução semanal | Disco cresce >20 GB em 30 dias |
-| Detectar cedo sem ruído | Testes da classificação (pendentes) | `make check` | Categoria somada >2 GB não vira aviso; achado já avisado notifica de novo sem crescer ≥20%; pasta `com.apple.*` ou da lista de exceções vira órfã |
+| Repo com trabalho não salvo nunca é alvo | `test_so_achados_de_cache_sao_apagados` (só CACHE vira "apagar"; projeto parado e git fora de dev nunca) | `make check` | Repo com commit sem push, stash ou arquivo modificado aparece como alvo |
+| Só `acoes/` apaga | import-linter "só acoes apaga arquivos" + `test_so_acoes_apaga_arquivos` (por nome: `rmtree`, `unlink`, `rmdir`, `remove`, `removedirs`, `TemporaryDirectory`, `NamedTemporaryFile`) | `make check` | `shutil`, `rmtree`, `unlink` ou `rmdir` fora de `acoes/` |
+| Instalação reproduzível | `test_install_idempotente` com HOME temporário | `make check` | Rodar `install.sh` duas vezes muda algo na segunda |
+| O detector está rodando | Heartbeat no `.zshrc` (`test_heartbeat_avisa_so_com_relatorio_de_mais_de_8_dias`) | Cada shell aberto | Último relatório com >8 dias |
+| Orçamento de disco | Aviso no relatório e na notificação (testes de crescimento em `test_classificacao.py`) | Execução semanal | Disco cresce >20 GB em 30 dias |
+| Detectar cedo sem ruído | `test_classificacao.py` e `test_library.py` | `make check` | Categoria somada >2 GB não vira aviso; achado já avisado notifica de novo sem crescer ≥20%; pasta `com.apple.*` ou da lista de exceções vira órfã |
 
 Regra derivada no `AGENTS.md`: seção "Segurança da limpeza".
 

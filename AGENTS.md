@@ -14,9 +14,10 @@ Arquitetura: script local, LaunchAgent semanal · Quantum: 1. ADRs em `docs/adr/
 
 ## Segurança da limpeza (ADR-0001)
 
-- Só `src/antilixo/acoes/` apaga. Fora dele, importar `shutil` reprova (import-linter).
-  `Path.unlink`/`rmdir`/`os.remove` fora dele são proibidos, mas ainda sem checagem automática
-  (`test_so_acoes_apaga_arquivos`, pendente): confira no diff.
+- Só `src/antilixo/acoes/` apaga. Fora dele, importar `shutil` reprova (import-linter), e
+  `test_so_acoes_apaga_arquivos` reprova `rmtree`, `unlink`, `rmdir`, `remove`, `removedirs`,
+  `TemporaryDirectory` e `NamedTemporaryFile`. Ele casa por nome: `list.remove` também reprova
+  (use fatia), e apagar por referência indireta passa. Confira no diff.
 - `acoes/` só apaga caminho que, resolvido (`..` e symlinks seguidos), fica dentro de um item da
   allowlist em `dominio/`. Fora disso: `ForaDaAllowlistError`, e nada é apagado.
 - Allowlist fechada: caches do npm, uv, Homebrew e Gradle. Item novo exige ADR.
@@ -29,9 +30,20 @@ Arquitetura: script local, LaunchAgent semanal · Quantum: 1. ADRs em `docs/adr/
 - Aviso: quando a soma de uma categoria passa de 2 GB. O relatório lista os itens dela.
 - Notificação: achado já avisado só volta a notificar se crescer ≥20% desde o último aviso.
   Continua no relatório toda semana. O estado guarda o tamanho no momento do aviso.
-- Órfão da `~/Library`: bundle id da pasta sem app correspondente em `/Applications` ou
-  `~/Applications` (lido de `Contents/Info.plist` com `plistlib`). Pastas do sistema
-  (`com.apple.*` e a lista de exceções em `dominio/`) nunca são órfãs.
+- Órfão da `~/Library`: bundle id da pasta sem app correspondente em `/Applications`,
+  `~/Applications` ou `/System/Applications` (lido de `Contents/Info.plist` com `plistlib`,
+  inclusive subpastas e bundles aninhados). Bundle id instalado + `.algo` conta como do app.
+  Pastas do sistema (`com.apple.*` e a lista de exceções em `dominio/excecoes_library.py`) nunca
+  são órfãs.
+- Pasta sem forma de bundle id (Notion, Comet) é órfã quando o nome não bate, sem diferenciar
+  maiúsculas, com o nome do `.app`, o `CFBundleName` ou o `CFBundleDisplayName` de nenhum app
+  instalado, nem com o 2º rótulo do bundle id de um app instalado (`com.google.*` → `Google`).
+  Pastas ocultas são ignoradas. Falso positivo é aceito: vira só aviso.
+- Tamanho é espaço ocupado no disco (`st_blocks * 512`); hardlink conta uma vez por achado.
+- Datas no futuro no estado (relógio errado): medição futura é descartada; `ultima_limpeza`
+  futura conta como "pode limpar". Se a limpeza falhar em tudo, `ultima_limpeza` não avança.
+- Repo de terceiros no HOME é hostil: todo `git` do coletor neutraliza `core.fsmonitor` e os
+  filtros da config do repo antes de ler o status.
 - Regra que não está aqui nem no ADR: perguntar, não inferir.
 
 ## Contextos e fronteiras
@@ -96,11 +108,15 @@ Arquitetura: script local, LaunchAgent semanal · Quantum: 1. ADRs em `docs/adr/
 
 ```
 src/antilixo/
-  dominio/      allowlist, classificação (núcleo, puro)
+  __main__.py   python -m antilixo: o que o LaunchAgent roda (domingo 10h)
+  execucao.py   uma execução: coleta → classifica → limpa → relatório, estado, notificação
+  dominio/      allowlist, classificação, tipos, tamanho (núcleo, puro)
   coletores/    varredura → Achado
   acoes/        único lugar que apaga
   relatorio/    Markdown + osascript
 tests/<pasta>/test_<modulo>.py
 docs/adr/       decisões
+install.sh      instalação idempotente (LaunchAgent + heartbeat no .zshrc)
+instalacao/     modelo do plist e trecho do heartbeat
 scripts/        portão e hook
 ```
