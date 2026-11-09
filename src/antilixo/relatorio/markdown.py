@@ -23,7 +23,12 @@ ROTULOS: dict[Categoria, str] = {
 }
 
 
-def montar_relatorio(veredito: Veredito, resultado: ResultadoDaLimpeza, agora: datetime) -> str:
+def montar_relatorio(
+    veredito: Veredito,
+    resultado: ResultadoDaLimpeza,
+    agora: datetime,
+    falhas_de_coleta: tuple[str, ...] = (),
+) -> str:
     linhas = [f"# Relatório do antilixo — {agora:%Y-%m-%d %H:%M}", ""]
     if veredito.crescimento_do_disco_bytes is not None:
         crescimento = formatar_tamanho(veredito.crescimento_do_disco_bytes)
@@ -49,6 +54,8 @@ def montar_relatorio(veredito: Veredito, resultado: ResultadoDaLimpeza, agora: d
             [f"{codigo(f.achado.caminho)} — {em_uma_linha(f.erro)}" for f in resultado.falhas],
         )
     )
+    # Coletor que quebrou: o resto do relatório vale, mas está incompleto (revisão de 2026-11-09).
+    linhas.extend(_secao("Coletores com erro", [em_uma_linha(f) for f in falhas_de_coleta]))
     return "\n".join(linhas)
 
 

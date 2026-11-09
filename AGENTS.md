@@ -8,7 +8,7 @@ Arquitetura: script local, LaunchAgent semanal · Quantum: 1. ADRs em `docs/adr/
 - Portão: `make check` (lock, juiz, ruff, basedpyright, import-linter, pytest, uv audit). Rode
   antes de dizer "pronto" e mostre a saída. O hook Stop roda o mesmo.
 - Só os testes: `make test`. Formatar: `make fmt`.
-- A suíte inteira roda em <10 s e nunca toca o HOME real: todo caminho entra como parâmetro
+- A suíte inteira roda em <15 s e nunca toca o HOME real: todo caminho entra como parâmetro
   (`home: Path`), e o teste usa `tmp_path`.
 - Commit só quando o humano pedir.
 

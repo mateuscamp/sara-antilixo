@@ -1,5 +1,6 @@
 """Execução semanal ponta a ponta num HOME falso (ADR-0001)."""
 
+import dataclasses
 import os
 import subprocess
 import sys
@@ -8,7 +9,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from antilixo.dominio.modelo import Categoria
+from antilixo.coletores.caches import coletar_caches
+from antilixo.dominio.modelo import Achado, Categoria
 from antilixo.execucao import Ambiente, coletar_tudo, executar
 from antilixo.relatorio.estado_em_disco import ler_estado
 
@@ -97,8 +99,47 @@ def test_coleta_inclui_repositorio_git_fora_de_dev(tmp_path: Path) -> None:
     repo.mkdir(parents=True)
     _ = subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)  # noqa: S603, S607  # motivo: git do PATH com lista fixa, só para montar o repo de teste
 
-    achados = coletar_tudo(_ambiente(tmp_path, ExecutorFalso()))
+    achados = coletar_tudo(_ambiente(tmp_path, ExecutorFalso())).achados
 
     assert [
         (a.categoria, a.caminho) for a in achados if a.categoria is Categoria.GIT_FORA_DE_DEV
     ] == [(Categoria.GIT_FORA_DE_DEV, repo)]
+
+
+def test_relatorio_que_nao_grava_nao_impede_estado_nem_limpeza(tmp_path: Path) -> None:
+    # Achado da revisão de 2026-11-09: sem isso, a data da limpeza se perdia e a semana seguinte
+    # apagava de novo.
+    cache = _cache_npm(tmp_path)
+    _estado(tmp_path).mkdir(parents=True)
+    _ = (_estado(tmp_path) / "relatorios").write_text("arquivo no lugar da pasta")
+
+    executar(_ambiente(tmp_path, ExecutorFalso()))
+
+    assert not cache.exists()
+    assert ler_estado(_estado(tmp_path), hoje=AGORA.date()).ultima_limpeza == AGORA.date()
+
+
+def _coletor_quebrado(ambiente: Ambiente) -> tuple[Achado, ...]:
+    del ambiente
+    msg = "plist esquisito"
+    raise ValueError(msg)
+
+
+def _coletor_de_caches(ambiente: Ambiente) -> tuple[Achado, ...]:
+    return coletar_caches(ambiente.home)
+
+
+def test_coletor_que_quebra_vira_linha_no_relatorio_e_os_outros_seguem(tmp_path: Path) -> None:
+    cache = _cache_npm(tmp_path)
+    ambiente = dataclasses.replace(
+        _ambiente(tmp_path, ExecutorFalso()),
+        coletores=(("quebrado", _coletor_quebrado), ("caches", _coletor_de_caches)),
+    )
+
+    executar(ambiente)
+
+    relatorio = _estado(tmp_path) / "relatorio.md"
+    assert relatorio.is_file()
+    assert "quebrado" in relatorio.read_text()
+    assert "plist esquisito" in relatorio.read_text()
+    assert not cache.exists()

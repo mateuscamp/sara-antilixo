@@ -24,7 +24,7 @@ Quantum atual: 1. Um processo local rodado pelo launchd; o único dado próprio 
 | | Limpeza segura | Repos com commit sem push no meio do lixo | Zero deleção fora da allowlist; repo com commit sem push, stash ou arquivo modificado nunca é alvo |
 | | Sobreviver à formatação | O disk-watch se perdeu na formatação | `git clone` + `./install.sh` em <10 min, idempotente |
 | | Silêncio | Aviso que se ignora vira ruído | 0 notificações em semana sem achado novo |
-| | Testável | Código que apaga arquivo do usuário | Suíte em <10 s sem tocar o HOME real |
+| | Testável | Código que apaga arquivo do usuário | Suíte em <15 s sem tocar o HOME real (era <10 s até 2026-11-09; ver Notas) |
 
 ## Alternativas consideradas
 
@@ -91,5 +91,11 @@ Regra derivada no `AGENTS.md`: seção "Segurança da limpeza".
 
 Regras do domínio decididas em 2026-11-09 (aviso por categoria somada >2 GB, nova notificação
 só com crescimento ≥20%, órfão por bundle id com lista de exceções do sistema): ver `AGENTS.md`.
+
+Orçamento da suíte revisto em 2026-11-09, de <10 s para <15 s, decidido pelo usuário: com os
+coletores integrados, 301 testes mediram 10,3 a 12,2 s, e o tempo vem dos testes com git e bash
+de verdade (coletor de projetos, install.sh), que são a parte que dá segurança. Alternativas
+recusadas: pytest-xdist (dependência nova, risco de teste não isolado) e mover esses testes para o
+`make e2e` (sairiam do hook Stop).
 
 Autor: Mateus Campelo · Criado em: 2026-11-08 · Aprovado em: 2026-11-08
